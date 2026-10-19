@@ -1,0 +1,114 @@
+import { describe, expect, it } from 'vitest';
+import { BOT_PROFILES, type BotLevel } from '../balance';
+import { BotBrain } from './bot';
+import { CombatSim, type ActorInput } from './sim';
+import { DT, box, flatSim, spawnAt } from './testkit';
+import { BOT_ID, PLAYER_ID, addBot, createTraining } from './training';
+
+/** Bot vs a motionless target. Returns seconds until the first kill (or Infinity) and the bot's stats. */
+function duelStill(level: BotLevel, seed: number, dist = 15, secs = 30, ...walls: ReturnType<typeof box>[]) {
+  const sim = flatSim(seed, [spawnAt(0, 0)], ...walls);
+  const target = sim.addActor({ id: 'target', kind: 'player', name: 'T', spawn: spawnAt(0, 0) });
+  const bot = sim.addActor({ id: 'bot', kind: 'bot', name: 'B', spawn: spawnAt(0, -dist), loadout: [BOT_PROFILES[level].weapon] });
+  const brain = new BotBrain(BOT_PROFILES[level], seed * 31 + 7, 0);
+  let firstKill = Infinity;
+  const ev: string[] = [];
+  for (let i = 0; i < secs * 60; i++) {
+    sim.step(DT, new Map<string, ActorInput>([['bot', brain.think(bot, target, sim.world, DT)]]));
+    for (const e of sim.drainEvents()) { ev.push(e.type); if (e.type === 'kill' && firstKill === Infinity) firstKill = sim.time; }
+  }
+  return { firstKill, bot, target, ev, sim };
+}
+
+describe('bot', () => {
+  it('kills a stationary target in the open at every difficulty', () => {
+    for (const level of ['easy', 'medium', 'hard'] as const) {
+      const r = duelStill(level, 1);
+      expect(r.firstKill).toBeLessThan(20);
+      expect(r.bot.stats.kills).toBeGreaterThanOrEqual(1);
+    }
+  });
+  it('is fair: it misses sometimes, never hits 100% of shots', () => {
+    const r = duelStill('medium', 2);
+    expect(r.bot.stats.shotsFired).toBeGreaterThan(10);
+    expect(r.bot.stats.shotsHit / r.bot.stats.shotsFired).toBeLessThan(0.98);
+  });
+  it('harder bots kill faster on average (10 seeds)', () => {
+    const mean = (level: BotLevel): number => {
+      let s = 0;
+      for (let seed = 1; seed <= 10; seed++) s += Math.min(duelStill(level, seed, 15, 40).firstKill, 40);
+      return s / 10;
+    };
+    const easy = mean('easy'), medium = mean('medium'), hard = mean('hard');
+    expect(hard).toBeLessThan(medium);
+    expect(medium).toBeLessThan(easy);
+  });
+  it('reacts after its reaction delay: no shots in the first reactionSec of seeing the target', () => {
+    const sim = flatSim(1);
+    const target = sim.addActor({ id: 'target', kind: 'player', name: 'T', spawn: spawnAt(0, 0) });
+    const bot = sim.addActor({ id: 'bot', kind: 'bot', name: 'B', spawn: spawnAt(0, -15), loadout: ['vanguard'] });
+    const brain = new BotBrain(BOT_PROFILES.hard, 5, 0);
+    const n = Math.floor(BOT_PROFILES.hard.reactionSec * 60) - 1;
+    for (let i = 0; i < n; i++) sim.step(DT, new Map([['bot', brain.think(bot, target, sim.world, DT)]]));
+    expect(bot.stats.shotsFired).toBe(0);
+  });
+  it('never fires without line of sight', () => {
+    const wall = box(-100, 0, -8, 100, 12, -7); // endless wall between them
+    const r = duelStill('hard', 3, 15, 15, wall);
+    expect(r.bot.stats.shotsFired).toBe(0);
+    expect(r.bot.body.pos.z).toBeLessThan(-7);
+  });
+  it('reloads on its own when the magazine runs dry', () => {
+    const r = duelStill('easy', 4, 28, 40); // long range = lots of missed shots
+    expect(r.ev.includes('reloadStart')).toBe(true);
+    expect(r.ev.includes('reloadDone')).toBe(true);
+  });
+  it('is idle (and harmless) while dead', () => {
+    const sim = flatSim(1);
+    const target = sim.addActor({ id: 'target', kind: 'player', name: 'T', spawn: spawnAt(0, 0) });
+    const bot = sim.addActor({ id: 'bot', kind: 'bot', name: 'B', spawn: spawnAt(0, -10), loadout: ['vanguard'] });
+    const brain = new BotBrain(BOT_PROFILES.medium, 1, 0);
+    bot.hp.alive = false; bot.hp.respawnT = 99;
+    const inp = brain.think(bot, target, sim.world, DT);
+    expect([inp.fire, inp.moveX, inp.moveZ, inp.jump]).toEqual([false, 0, 0, false]);
+  });
+});
+
+describe('bot vs bot on Foundry (soak)', () => {
+  it('finds, fights and kills over 2 simulated minutes without leaving the map or producing NaN', () => {
+    for (const seed of [1, 2, 3]) {
+      const t = createTraining(seed);
+      t.sim.removeActor(PLAYER_ID);
+      for (const a of [...t.sim.actors]) if (a.kind === 'dummy') t.sim.removeActor(a.id);
+      const A = t.sim.addActor({ id: 'A', kind: 'bot', name: 'A', spawn: t.scene.spawns[0]!, loadout: ['vanguard'] });
+      const B = t.sim.addActor({ id: 'B', kind: 'bot', name: 'B', spawn: t.scene.spawns[1]!, loadout: ['vanguard'] });
+      const bA = new BotBrain(BOT_PROFILES.medium, seed, A.view.yaw), bB = new BotBrain(BOT_PROFILES.medium, seed + 100, B.view.yaw);
+      for (let i = 0; i < 120 * 60; i++) {
+        t.sim.step(DT, new Map<string, ActorInput>([['A', bA.think(A, B, t.sim.world, DT)], ['B', bB.think(B, A, t.sim.world, DT)]]));
+        t.sim.drainEvents();
+        for (const a of [A, B]) {
+          const p = a.body.pos;
+          if (!Number.isFinite(p.x + p.y + p.z)) throw new Error(`NaN position seed ${seed}`);
+          if (Math.abs(p.x) > 30 || Math.abs(p.z) > 22 || p.y < -1) throw new Error(`out of bounds seed ${seed}: ${p.x},${p.y},${p.z}`);
+        }
+      }
+      expect(A.stats.kills + B.stats.kills).toBeGreaterThanOrEqual(4);
+    }
+  });
+});
+
+describe('training setup', () => {
+  it('adds the bot at a hidden far spawn, with the Vanguard only', () => {
+    const t = createTraining(1);
+    const bot = addBot(t, 'medium');
+    expect(bot.id).toBe(BOT_ID);
+    expect(bot.rack.map((w) => w.id)).toEqual(['vanguard']);
+    expect(Math.hypot(bot.body.pos.x - t.player.body.pos.x, bot.body.pos.z - t.player.body.pos.z)).toBeGreaterThan(30);
+  });
+  it('a CombatSim can be driven without any brain (idle inputs)', () => {
+    const sim: CombatSim = flatSim(1);
+    sim.addActor({ id: 'x', kind: 'bot', name: 'x', spawn: spawnAt(0, 0) });
+    for (let i = 0; i < 60; i++) sim.step(DT, new Map());
+    expect(sim.actors).toHaveLength(1);
+  });
+});

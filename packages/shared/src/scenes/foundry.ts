@@ -41,5 +41,10 @@ function build(): Box[] {
 }
 export const FOUNDRY: SceneDef = {
   id: 'foundry', name: 'Foundry', bounds: { x: 28, z: 20 }, boxes: build(),
-  spawns: [{ x: -24, y: 0, z: 0, yaw: -Math.PI / 2 }, { x: 24, y: 0, z: 0, yaw: Math.PI / 2 }],
+  spawns: [
+    { x: -24, y: 0, z: 0, yaw: -Math.PI / 2 }, { x: 24, y: 0, z: 0, yaw: Math.PI / 2 },
+    // two more mirrored pairs (point symmetry through the centre), aimed at the middle of the arena
+    { x: -24, y: 0, z: 10, yaw: Math.atan2(-24, 10) }, { x: 24, y: 0, z: -10, yaw: Math.atan2(24, -10) },
+    { x: -8, y: 0, z: 14, yaw: Math.atan2(-8, 14) }, { x: 8, y: 0, z: -14, yaw: Math.atan2(8, -14) },
+  ],
 };

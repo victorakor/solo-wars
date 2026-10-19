@@ -1,5 +1,16 @@
 import * as THREE from 'three';
 import { MOVE, type PlayerState } from '@arena/shared';
+import { buildWeaponModel, type WeaponModel } from './weaponModel';
+
+/** Extra pose inputs beyond movement state. `deadT` is seconds since death, or -1 while alive. */
+export interface CharacterPose {
+  armed: boolean;
+  pitch: number;
+  reloading: boolean;
+  deadT: number;
+}
+
+const flashMat = new THREE.SpriteMaterial({ color: 0xffd27a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
 
 const part = (w: number, h: number, d: number, color: number, y: number): THREE.Mesh => {
   const geo = new THREE.BoxGeometry(w, h, d); geo.translate(0, y, 0);
@@ -13,6 +24,8 @@ export class Character {
   private body = new THREE.Group(); private hips = new THREE.Group(); private torso = new THREE.Group();
   private head: THREE.Mesh; private arms: THREE.Group[] = []; private legs: THREE.Group[] = [];
   private phase = 0; private crouchK = 0; private rollAngle = 0;
+  private weapon: WeaponModel | null = null; private weaponId: string | null = null;
+  private flash = new THREE.Sprite(flashMat); private flashT = 0;
   constructor(primary = 0x2f6fb5, secondary = 0xe8b04a) {
     this.root.add(this.body); this.body.add(this.hips); this.hips.position.y = 0.9;
     this.hips.add(this.torso);
@@ -25,8 +38,31 @@ export class Character {
       leg.add(part(0.2, 0.9, 0.2, primary, -0.45)); this.hips.add(leg); this.legs.push(leg);
     }
   }
+  /** Shows the gun with this model id (or none). Cheap when unchanged. */
+  setWeapon(modelId: string | null): void {
+    if (modelId === this.weaponId) return;
+    this.weaponId = modelId;
+    if (this.weapon) { this.arms[1]!.remove(this.weapon.group); this.weapon = null; }
+    if (modelId === null) return;
+    this.weapon = buildWeaponModel(modelId);
+    this.weapon.group.position.set(0, -0.58, 0);
+    this.weapon.group.rotation.x = -Math.PI / 2; // barrel along the forearm
+    this.flash.scale.set(0.5, 0.5, 1); this.flash.visible = false;
+    this.weapon.muzzle.add(this.flash);
+    this.arms[1]!.add(this.weapon.group);
+  }
+
+  /** Shows the muzzle flash for a few frames. */
+  fire(): void { this.flashT = 0.05; if (this.weapon) this.flash.visible = true; }
+
+  /** World position of the barrel tip (falls back to the chest when unarmed). */
+  muzzleWorld(out: THREE.Vector3): THREE.Vector3 {
+    if (this.weapon) return this.weapon.muzzle.getWorldPosition(out);
+    return out.set(this.root.position.x, this.root.position.y + 1.2, this.root.position.z);
+  }
+
   /** Poses the model from sim state. `yaw` is aim yaw; `speed` is horizontal speed. */
-  update(s: PlayerState, yaw: number, dt: number): void {
+  update(s: PlayerState, yaw: number, dt: number, pose?: CharacterPose): void {
     const speed = Math.hypot(s.vel.x, s.vel.z);
     this.root.position.set(s.pos.x, s.pos.y, s.pos.z);
     const rolling = s.rollT > 0;
@@ -50,5 +86,18 @@ export class Character {
     this.rollAngle = target; this.body.position.y = rolling ? 0.4 : 0;
     this.body.rotation.x = -this.rollAngle;
     if (rolling) { this.legs[0]!.rotation.x = this.legs[1]!.rotation.x = 1.4; }
+    if (this.flashT > 0) { this.flashT -= dt; this.flash.visible = this.flashT > 0; }
+    if (!pose) return;
+    if (pose.deadT >= 0) { // fall backwards over ~0.45 s and stay down
+      this.body.rotation.x = Math.min(1, pose.deadT / 0.45) * (Math.PI / 2);
+      this.body.position.y = 0;
+      this.flash.visible = false;
+      return;
+    }
+    if (pose.armed && !rolling) { // both arms forward, tilted with the aim; right arm dips while reloading
+      const up = Math.PI / 2 + pose.pitch * 0.9;
+      this.arms[1]!.rotation.x = up - (pose.reloading ? 0.6 : 0);
+      this.arms[0]!.rotation.x = up; this.arms[0]!.rotation.z = 0;
+    }
   }
 }
