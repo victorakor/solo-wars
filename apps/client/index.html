@@ -4,14 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Arena Duel</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #101418; color: #e8eef4; font: 13px system-ui, sans-serif; overflow: hidden; }
+      canvas { width: 100vw; height: 100vh; display: block; }
+      #hud { position: fixed; left: 16px; bottom: 16px; pointer-events: none; }
+      .bar { width: 220px; height: 10px; background: #0008; border: 1px solid #fff4; }
+      .bar i { display: block; height: 100%; background: #e8b04a; }
+      .roll, .dbg { margin-top: 6px; text-shadow: 0 1px 2px #000; }
+      #help { position: fixed; top: 12px; left: 16px; opacity: .8; text-shadow: 0 1px 2px #000; }
+    </style>
   </head>
-  <body style="margin:0;background:#101418;color:#e8eef4;font-family:system-ui,sans-serif">
-    <main style="display:grid;place-items:center;height:100vh">
-      <div>
-        <h1>Arena Duel</h1>
-        <p id="status">Connecting…</p>
-      </div>
-    </main>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="hud"></div>
+    <div id="help">Click to look · WASD move · Shift sprint · Space jump · C crouch · Q roll</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
