@@ -1,0 +1,4 @@
+{ "name": "@arena/client", "version": "0.0.0", "private": true, "type": "module",
+  "scripts": { "dev": "vite", "build": "tsc -p . && vite build", "typecheck": "tsc -p ." },
+  "dependencies": { "@arena/shared": "workspace:*", "colyseus.js": "^0.16.0" },
+  "devDependencies": { "vite": "^5.4.0" } }

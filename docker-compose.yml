@@ -1,0 +1,6 @@
+# Phase 0 skeleton. PostgreSQL, Redis profile and client container arrive in later phases.
+services:
+  server:
+    build: { context: ., dockerfile: Dockerfile.server }
+    env_file: [.env.example]
+    ports: ["2567:2567"]

@@ -1,0 +1,8 @@
+FROM node:20-alpine
+RUN corepack enable
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+ENV NODE_ENV=production
+EXPOSE 2567
+CMD ["pnpm", "--filter", "@arena/server", "start"]
