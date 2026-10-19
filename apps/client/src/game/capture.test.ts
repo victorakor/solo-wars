@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { LOCK_BLOCKED_MESSAGE, MouseCapture, type LockApi } from './capture';
+import { LOCK_BLOCKED_MESSAGE, MouseCapture } from './capture';
 
 /** Fake browser: tracks the lock like the real API, and can refuse requests. */
 function fake(opts: { refuse?: boolean; reject?: boolean } = {}) {
   let locked = false;
   const calls = { request: 0, exit: 0 };
-  let cap!: MouseCapture;
-  const api: LockApi = {
+  // the closures only run after construction, so they can refer to `cap`
+  const cap: MouseCapture = new MouseCapture({
     isLocked: () => locked,
     request: () => {
       calls.request++;
@@ -14,8 +14,7 @@ function fake(opts: { refuse?: boolean; reject?: boolean } = {}) {
       if (!opts.refuse) { locked = true; cap.lockChanged(true); }
     },
     exit: () => { calls.exit++; locked = false; cap.lockChanged(false); },
-  };
-  cap = new MouseCapture(api);
+  });
   return { cap, calls, isLocked: () => locked, browserEsc: () => { locked = false; cap.lockChanged(false); } };
 }
 
