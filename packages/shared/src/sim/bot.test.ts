@@ -74,6 +74,56 @@ describe('bot', () => {
   });
 });
 
+describe('bot is mobile and aggressive', () => {
+  /** Two bots of the same level in the open for 30 s; returns what bot A tried to do. */
+  function openFight(level: BotLevel) {
+    const sim = flatSim(3);
+    const A = sim.addActor({ id: 'A', kind: 'bot', name: 'A', spawn: spawnAt(0, 0), loadout: ['vanguard'] });
+    const B = sim.addActor({ id: 'B', kind: 'bot', name: 'B', spawn: spawnAt(0, -18), loadout: ['vanguard'] });
+    const bA = new BotBrain(BOT_PROFILES[level], 5, 0), bB = new BotBrain(BOT_PROFILES[level], 9, 0);
+    let flips = 0, last = 0, dodges = 0, jumps = 0;
+    for (let i = 0; i < 60 * 30; i++) {
+      const ia = bA.think(A, B, sim.world, DT);
+      if (ia.moveX !== 0) { if (last !== 0 && ia.moveX !== last) flips++; last = ia.moveX; }
+      if (ia.dodge) dodges++;
+      if (ia.jump) jumps++;
+      sim.step(DT, new Map<string, ActorInput>([['A', ia], ['B', bB.think(B, A, sim.world, DT)]]));
+      sim.drainEvents();
+    }
+    return { flips, dodges, jumps, shots: A.stats.shotsFired + B.stats.shotsFired };
+  }
+  it('strafes and keeps changing direction during a fight (not a straight line)', () => {
+    for (const level of ['easy', 'medium', 'hard'] as const) {
+      const r = openFight(level);
+      expect(r.flips).toBeGreaterThanOrEqual(6);
+      expect(r.shots).toBeGreaterThan(20);
+    }
+  });
+  it('rolls away when shot, and the harder bots jump-strafe', () => {
+    expect(openFight('medium').dodges).toBeGreaterThanOrEqual(1);
+    expect(openFight('hard').dodges).toBeGreaterThanOrEqual(1);
+    expect(openFight('hard').jumps).toBeGreaterThanOrEqual(1);
+    expect(openFight('easy').jumps).toBe(0);
+  });
+  it('hunts a target hidden behind Foundry cover and opens fire within 15 s', () => {
+    for (const level of ['easy', 'medium', 'hard'] as const) {
+      for (let seed = 1; seed <= 6; seed++) {
+        const t = createTraining(seed);
+        const bot = addBot(t, level);
+        const brain = new BotBrain(BOT_PROFILES[level], seed, bot.view.yaw);
+        let opened = Infinity;
+        for (let i = 0; i < 60 * 25 && opened === Infinity; i++) {
+          t.sim.step(DT, new Map([[BOT_ID, brain.think(bot, t.player, t.sim.world, DT)]]));
+          t.sim.drainEvents();
+          t.player.hp.hp = 100; // the target just stands there
+          if (bot.stats.shotsFired > 0) opened = t.sim.time;
+        }
+        expect(opened).toBeLessThan(15);
+      }
+    }
+  });
+});
+
 describe('bot vs bot on Foundry (soak)', () => {
   it('finds, fights and kills over 2 simulated minutes without leaving the map or producing NaN', () => {
     for (const seed of [1, 2, 3]) {

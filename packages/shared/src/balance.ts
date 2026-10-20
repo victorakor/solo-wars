@@ -184,6 +184,12 @@ export interface BotProfile {
   /** Aims down sights beyond this distance. */
   adsRange: number;
   weapon: WeaponId;
+  /** Chance to roll away when it takes damage while it can see its target (roll cooldown permitting). */
+  dodgeChance: number;
+  /** Jumps per second while strafing in a fight. */
+  jumpiness: number;
+  /** 0..1: how hard it pushes when its target is reloading or hurt, and how long it holds before backing off. */
+  aggression: number;
 }
 
 export const BOT_PROFILES: Record<BotLevel, BotProfile> = {
@@ -191,15 +197,18 @@ export const BOT_PROFILES: Record<BotLevel, BotProfile> = {
     level: 'easy', reactionSec: 0.6, turnRate: 150, aimErrorDeg: 3.5, aimComp: 0.3,
     burstMin: 0.25, burstMax: 0.5, pauseMin: 0.6, pauseMax: 1.2, strafeMin: 0.8, strafeMax: 1.6,
     rangeMin: 10, rangeMax: 22, fireConeDeg: 5, adsRange: Infinity, weapon: 'vanguard',
+    dodgeChance: 0.15, jumpiness: 0, aggression: 0.3,
   },
   medium: {
     level: 'medium', reactionSec: 0.35, turnRate: 260, aimErrorDeg: 1.8, aimComp: 0.6,
     burstMin: 0.4, burstMax: 0.9, pauseMin: 0.35, pauseMax: 0.8, strafeMin: 0.6, strafeMax: 1.3,
     rangeMin: 10, rangeMax: 25, fireConeDeg: 3.5, adsRange: 25, weapon: 'vanguard',
+    dodgeChance: 0.4, jumpiness: 0.15, aggression: 0.6,
   },
   hard: {
     level: 'hard', reactionSec: 0.18, turnRate: 420, aimErrorDeg: 0.8, aimComp: 0.85,
     burstMin: 0.6, burstMax: 1.4, pauseMin: 0.2, pauseMax: 0.5, strafeMin: 0.4, strafeMax: 1.0,
     rangeMin: 12, rangeMax: 28, fireConeDeg: 2.5, adsRange: 18, weapon: 'vanguard',
+    dodgeChance: 0.7, jumpiness: 0.35, aggression: 0.9,
   },
 };
