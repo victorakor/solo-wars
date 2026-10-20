@@ -163,8 +163,29 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
 };
 
-/** Phase 2 debug rack: keys 1-5 select these. Replaced by the real slot system in Phase 4. */
+/** Every firearm. These are what you can pick as your loadout weapon and what floor pads can roll. */
 export const TRAINING_RACK: readonly WeaponId[] = ['sidearm', 'rattler', 'vanguard', 'breaker', 'longshot'];
+
+/** Floor weapon rarity (spec 6.3): damage and magazine multipliers, roll weight, beam colour. */
+export const RARITY = [
+  { name: 'Common', dmg: 1, mag: 1, weight: 60, color: 0xffffff },
+  { name: 'Rare', dmg: 1.15, mag: 1.1, weight: 30, color: 0x4a9eff },
+  { name: 'Epic', dmg: 1.3, mag: 1.2, weight: 10, color: 0xb44aff },
+] as const;
+
+export const PICKUPS = {
+  /** Walk-over and swap distance (spec 7). */
+  radius: 1.5,
+  /** Practice range: first drops appear quickly (the spec's 10 s applies to real matches). */
+  firstSpawnSec: 3,
+  padRespawnSec: 25,
+  dropDespawnSec: 15,
+  /** The held floor weapon drops where you die. */
+  dropOnDeath: true,
+  /** Short lockout after taking or swapping so one press cannot do two things. */
+  cooldownSec: 0.4,
+  maxDrops: 24,
+} as const;
 
 export type BotLevel = 'easy' | 'medium' | 'hard';
 
@@ -183,7 +204,6 @@ export interface BotProfile {
   fireConeDeg: number;
   /** Aims down sights beyond this distance. */
   adsRange: number;
-  weapon: WeaponId;
   /** Chance to roll away when it takes damage while it can see its target (roll cooldown permitting). */
   dodgeChance: number;
   /** Jumps per second while strafing in a fight. */
@@ -196,19 +216,19 @@ export const BOT_PROFILES: Record<BotLevel, BotProfile> = {
   easy: {
     level: 'easy', reactionSec: 0.6, turnRate: 150, aimErrorDeg: 3.5, aimComp: 0.3,
     burstMin: 0.25, burstMax: 0.5, pauseMin: 0.6, pauseMax: 1.2, strafeMin: 0.8, strafeMax: 1.6,
-    rangeMin: 10, rangeMax: 22, fireConeDeg: 5, adsRange: Infinity, weapon: 'vanguard',
+    rangeMin: 10, rangeMax: 22, fireConeDeg: 5, adsRange: Infinity,
     dodgeChance: 0.15, jumpiness: 0, aggression: 0.3,
   },
   medium: {
     level: 'medium', reactionSec: 0.35, turnRate: 260, aimErrorDeg: 1.8, aimComp: 0.6,
     burstMin: 0.4, burstMax: 0.9, pauseMin: 0.35, pauseMax: 0.8, strafeMin: 0.6, strafeMax: 1.3,
-    rangeMin: 10, rangeMax: 25, fireConeDeg: 3.5, adsRange: 25, weapon: 'vanguard',
+    rangeMin: 10, rangeMax: 25, fireConeDeg: 3.5, adsRange: 25,
     dodgeChance: 0.4, jumpiness: 0.15, aggression: 0.6,
   },
   hard: {
     level: 'hard', reactionSec: 0.18, turnRate: 420, aimErrorDeg: 0.8, aimComp: 0.85,
     burstMin: 0.6, burstMax: 1.4, pauseMin: 0.2, pauseMax: 0.5, strafeMin: 0.4, strafeMax: 1.0,
-    rangeMin: 12, rangeMax: 28, fireConeDeg: 2.5, adsRange: 18, weapon: 'vanguard',
+    rangeMin: 12, rangeMax: 28, fireConeDeg: 2.5, adsRange: 18,
     dodgeChance: 0.7, jumpiness: 0.35, aggression: 0.9,
   },
 };

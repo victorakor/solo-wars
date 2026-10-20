@@ -1,5 +1,6 @@
-import { COMBAT, TRAINING_RACK, WEAPONS, type WeaponId } from '../balance';
+import { COMBAT, PICKUPS, RARITY, TRAINING_RACK, WEAPONS, type WeaponId } from '../balance';
 import type { CollisionWorld, Vec3 } from '../collision';
+import type { PadDef } from '../scenes/foundry';
 import {
   canShoot, eyeHeightOf, heightOf, newPlayer, stepPlayer, type MoveInput, type PlayerState,
 } from '../movement';
@@ -27,13 +28,17 @@ export interface ActorInput extends MoveInput {
   reload: boolean;
   /** Rack index to switch to, or null. */
   slot: number | null;
+  /** E: swap with the pickup you are standing on (walking over one into an empty slot is automatic). */
+  interact: boolean;
+  /** X: drop the floor weapon. */
+  drop: boolean;
   aimYaw?: number;
   aimPitch?: number;
 }
 
 export const idleInput = (): ActorInput => ({
   moveX: 0, moveZ: 0, yaw: 0, pitch: 0, jump: false, sprint: false, crouch: false, dodge: false, ads: false,
-  fire: false, firePressed: false, reload: false, slot: null,
+  fire: false, firePressed: false, reload: false, slot: null, interact: false, drop: false,
 });
 const IDLE_INPUT: Readonly<ActorInput> = Object.freeze(idleInput());
 
@@ -68,6 +73,42 @@ export interface Actor {
   loadout: readonly WeaponId[];
   infiniteReserve: boolean;
   scratch: MoveInput;
+  /** Short lockout after a pickup, swap or drop. */
+  pickupCd: number;
+  /** Id of the pickup in reach right now (for the HUD prompt), or null. */
+  nearPickup: number | null;
+}
+
+/** Index of the floor-weapon slot if one is held, else -1. Slots before it are the permanent loadout. */
+export const floorSlot = (a: Actor): number => (a.rack.length > a.loadout.length ? a.loadout.length : -1);
+
+/** A weapon lying on the floor: a pad (respawns) or a drop (despawns). `state` is null while a pad is empty. */
+export interface Pickup {
+  id: number;
+  kind: 'pad' | 'drop';
+  x: number; y: number; z: number;
+  state: WeaponState | null;
+  /** Pads: seconds until the next roll appears. */
+  respawnT: number;
+  /** Drops: seconds until it despawns. */
+  despawnT: number;
+  /** Mirrored pads share a pair and so roll the same item. -1 for drops. */
+  pair: number;
+  cycle: number;
+  /** The actor index that just dropped this and must walk away before it can take it back. */
+  blockIndex: number | null;
+}
+
+/** Seeded pad roll: weapon uniform over the firearms, rarity 60/30/10. Same (seed, pair, cycle) gives the same item. */
+export function rollPad(seed: number, pair: number, cycle: number): { id: WeaponId; rarity: number } {
+  const rng = shotRng(seed, pair * 1000 + cycle, 0x70ad);
+  const id = TRAINING_RACK[Math.floor(rng() * TRAINING_RACK.length)]!;
+  let r = rng() * 100, rarity = RARITY.length - 1;
+  for (let i = 0; i < RARITY.length; i++) {
+    if (r < RARITY[i]!.weight) { rarity = i; break; }
+    r -= RARITY[i]!.weight;
+  }
+  return { id, rarity };
 }
 
 export interface PelletEvent {
@@ -83,7 +124,8 @@ export type CombatEvent =
     }
   | { type: 'damage'; victim: string; attacker: string | null; /** Horizontal unit vector from victim towards attacker. */ dirX: number; dirZ: number; amount: number }
   | { type: 'kill'; killer: string | null; victim: string; weapon: WeaponId | null; head: boolean }
-  | { type: 'dry' | 'reloadStart' | 'reloadDone' | 'equip'; actor: string }
+  | { type: 'dry' | 'reloadStart' | 'reloadDone' | 'equip' | 'weaponEmpty'; actor: string }
+  | { type: 'pickup'; actor: string; weapon: WeaponId; rarity: number }
   | { type: 'respawn'; actor: string; yaw: number };
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -92,14 +134,23 @@ const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.m
 export class CombatSim {
   readonly actors: Actor[] = [];
   time = 0;
+  readonly pickups: Pickup[] = [];
   private events: CombatEvent[] = [];
   private nextIndex = 0;
+  private nextPickupId = 0;
 
   constructor(
     readonly world: CollisionWorld,
     readonly spawns: readonly SpawnPoint[],
     readonly seed: number,
-  ) {}
+    pads: readonly PadDef[] = [],
+  ) {
+    for (const p of pads)
+      this.pickups.push({
+        id: this.nextPickupId++, kind: 'pad', x: p.x, y: p.y, z: p.z, state: null,
+        respawnT: PICKUPS.firstSpawnSec, despawnT: 0, pair: p.pair, cycle: 0, blockIndex: null,
+      });
+  }
 
   addActor(o: ActorOptions): Actor {
     const loadout = o.loadout && o.loadout.length > 0 ? o.loadout : o.kind === 'dummy' ? (['sidearm'] as const) : TRAINING_RACK;
@@ -115,6 +166,7 @@ export class CombatSim {
       view: { yaw: o.spawn.yaw, pitch: 0 },
       home: o.spawn, loadout, infiniteReserve: infinite,
       scratch: { moveX: 0, moveZ: 0, yaw: 0, pitch: 0, jump: false, sprint: false, crouch: false, dodge: false, ads: false },
+      pickupCd: 0, nearPickup: null,
     };
     this.actors.push(a);
     return a;
@@ -147,14 +199,6 @@ export class CombatSim {
     return e;
   }
 
-  /** Refills ammo on every weapon; `infinite` switches between unlimited and floor-pickup reserves. */
-  restock(a: Actor, infinite: boolean): void {
-    a.infiniteReserve = infinite;
-    a.rack = a.loadout.map((id) => newWeapon(id, infinite));
-    a.slot = 0;
-    resetRecoil(a.recoil);
-  }
-
   /** Brings a dead or alive actor back at full health at the given spawn. */
   private resetActor(a: Actor, spawn: SpawnPoint): void {
     a.body = newPlayer(spawn.x, spawn.y + 0.05, spawn.z);
@@ -163,12 +207,14 @@ export class CombatSim {
     a.rack = a.loadout.map((id) => newWeapon(id, a.infiniteReserve));
     a.slot = 0;
     resetRecoil(a.recoil);
+    a.pickupCd = 0; a.nearPickup = null;
     a.view.yaw = spawn.yaw; a.view.pitch = 0;
   }
 
   step(dt: number, inputs: ReadonlyMap<string, ActorInput>): void {
     this.time += dt;
     for (const a of this.actors) { a.prev.x = a.body.pos.x; a.prev.y = a.body.pos.y; a.prev.z = a.body.pos.z; }
+    this.tickPickups(dt);
     for (const a of this.actors) {
       if (!a.hp.alive) {
         a.hp.respawnT -= dt;
@@ -232,6 +278,88 @@ export class CombatSim {
       this.events.push({ type: 'dry', actor: a.id });
       if (ws.reloading) this.events.push({ type: 'reloadStart', actor: a.id });
     } else if (fr === 'fired') this.fire(a, ws, inp);
+
+    this.stepPickups(a, inp, dt);
+    this.reapEmptyFloorWeapon(a);
+  }
+
+  private tickPickups(dt: number): void {
+    for (let i = this.pickups.length - 1; i >= 0; i--) {
+      const p = this.pickups[i]!;
+      if (p.kind === 'drop') {
+        p.despawnT -= dt;
+        if (p.despawnT <= 0) this.pickups.splice(i, 1);
+      } else if (p.state === null) {
+        p.respawnT -= dt;
+        if (p.respawnT <= 0) {
+          const r = rollPad(this.seed, p.pair, p.cycle);
+          p.state = newWeapon(r.id, false, r.rarity);
+        }
+      }
+    }
+  }
+
+  /** Walk-over pickup into an empty floor slot, E to swap when occupied, X to drop. */
+  private stepPickups(a: Actor, inp: Readonly<ActorInput>, dt: number): void {
+    a.pickupCd = Math.max(0, a.pickupCd - dt);
+    const idx = a.loadout.length;
+    if (inp.drop && a.pickupCd <= 0 && a.rack.length > idx) {
+      const w = a.rack.splice(idx, 1)[0]!;
+      if (a.slot >= idx) { a.slot = 0; equipWeapon(a.rack[0]!, WEAPONS[a.rack[0]!.id]); }
+      this.dropWeapon(a, w, true);
+      a.pickupCd = PICKUPS.cooldownSec;
+    }
+    a.nearPickup = null;
+    let best: Pickup | null = null, bestD = Infinity;
+    for (const p of this.pickups) {
+      if (!p.state) continue;
+      const d = Math.hypot(p.x - a.body.pos.x, p.z - a.body.pos.z);
+      if (p.blockIndex === a.index) { if (d > PICKUPS.radius) p.blockIndex = null; else continue; }
+      if (d <= PICKUPS.radius && Math.abs(p.y - a.body.pos.y) <= 2 && d < bestD) { best = p; bestD = d; }
+    }
+    if (!best) return;
+    a.nearPickup = best.id;
+    if (a.pickupCd > 0) return;
+    if (a.rack.length <= idx) this.takePickup(a, best);
+    else if (inp.interact) {
+      const old = a.rack[idx]!;
+      this.takePickup(a, best);
+      this.dropWeapon(a, old, true);
+    }
+  }
+
+  private takePickup(a: Actor, p: Pickup): void {
+    const ws = p.state!;
+    p.state = null;
+    if (p.kind === 'pad') { p.respawnT = PICKUPS.padRespawnSec; p.cycle++; }
+    else this.pickups.splice(this.pickups.indexOf(p), 1);
+    const idx = a.loadout.length;
+    a.rack[idx] = ws;
+    a.slot = idx;
+    equipWeapon(ws, WEAPONS[ws.id]);
+    a.stats.pickups++;
+    a.pickupCd = PICKUPS.cooldownSec;
+    this.events.push({ type: 'pickup', actor: a.id, weapon: ws.id, rarity: ws.rarity });
+  }
+
+  private dropWeapon(a: Actor, ws: WeaponState, blockOwner: boolean): void {
+    cancelReload(ws); ws.adsT = 0; ws.buffer = 0;
+    const drops = this.pickups.filter((p) => p.kind === 'drop');
+    if (drops.length >= PICKUPS.maxDrops) this.pickups.splice(this.pickups.indexOf(drops[0]!), 1);
+    this.pickups.push({
+      id: this.nextPickupId++, kind: 'drop', x: a.body.pos.x, y: a.body.pos.y, z: a.body.pos.z, state: ws,
+      respawnT: 0, despawnT: PICKUPS.dropDespawnSec, pair: -1, cycle: 0, blockIndex: blockOwner ? a.index : null,
+    });
+  }
+
+  /** A floor weapon with an empty magazine and no reserve disappears and you fall back to your loadout weapon. */
+  private reapEmptyFloorWeapon(a: Actor): void {
+    const idx = a.loadout.length;
+    const f = a.rack[idx];
+    if (!f || f.mag > 0 || f.reserve > 0) return;
+    a.rack.splice(idx, 1);
+    if (a.slot >= idx) { a.slot = 0; equipWeapon(a.rack[0]!, WEAPONS[a.rack[0]!.id]); }
+    this.events.push({ type: 'weaponEmpty', actor: a.id });
   }
 
   private fire(a: Actor, ws: WeaponState, inp: Readonly<ActorInput>): void {
@@ -244,7 +372,7 @@ export class CombatSim {
     const origin = { x: a.body.pos.x, y: a.body.pos.y + eyeHeightOf(a.body), z: a.body.pos.z };
     const spread = currentSpreadDeg(def, ws.adsT, motionOf(a.body));
     const res = resolveShot(
-      this.world, def, { origin, yaw, pitch, spreadDeg: spread, seed: this.seed, shotId, salt: a.index },
+      this.world, def, { origin, yaw, pitch, spreadDeg: spread, seed: this.seed, shotId, salt: a.index, damageMult: ws.dmgMult },
       this.targetsFor(a),
     );
     a.stats.shotsFired++;
@@ -285,6 +413,8 @@ export class CombatSim {
     victim.stats.deaths++;
     victim.stats.streak = 0;
     for (const w of victim.rack) { cancelReload(w); w.adsT = 0; }
+    const fi = victim.loadout.length;
+    if (PICKUPS.dropOnDeath && victim.rack.length > fi) this.dropWeapon(victim, victim.rack.splice(fi, 1)[0]!, false);
     resetRecoil(victim.recoil);
     const killerId = creditKiller(victim.hp, direct?.id ?? null, this.time);
     const killer = killerId === null ? undefined : this.actor(killerId);

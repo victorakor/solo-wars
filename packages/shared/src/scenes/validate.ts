@@ -15,6 +15,10 @@ export function validateScene(s: SceneDef): string[] {
       { x: p.x + MOVE.radius, y: p.y + MOVE.heightStand, z: p.z + MOVE.radius });
     if (hit.length) errs.push(`spawn ${i} intersects geometry`);
   });
+  s.pads.forEach((p, i) => {
+    if (w.query({ x: p.x - 0.4, y: p.y + 0.05, z: p.z - 0.4 }, { x: p.x + 0.4, y: p.y + 1, z: p.z + 0.4 }).length)
+      errs.push(`pad ${i} intersects geometry`);
+  });
   if (s.spawns.length < 2) errs.push('need at least 2 spawns');
   return errs;
 }

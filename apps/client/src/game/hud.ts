@@ -30,7 +30,7 @@ export class Hud {
     hpnum: $('hpnum'), hpfill: $('hpfill'), stam: $('stamfill'), roll: $('rollinfo'), vitals: $('vitals'),
     wname: $('wname'), ammo: $('ammo'), reload: $('reload'), slots: $('slots'), crosshair: $('crosshair'),
     scope: $('scope'), vignette: $('vignette'), hit: $('hitmarker'), nums: $('dmgnums'), arcs: $('arcs'),
-    feed: $('feed'), train: $('trainbody'), respawn: $('respawn'), rmain: $('respawnmain'), rsub: $('respawnsub'), dbg: $('dbg'),
+    feed: $('feed'), train: $('trainbody'), prompt: $('prompt'), respawn: $('respawn'), rmain: $('respawnmain'), rsub: $('respawnsub'), dbg: $('dbg'),
   };
   private text = new Map<HTMLElement, string>();
   private vignetteOff = 0;
@@ -108,6 +108,12 @@ export class Hud {
   train(lines: string[]): void {
     this.set(this.el.train, lines.join('\n'));
     this.el.train.style.whiteSpace = 'pre-line';
+  }
+
+  /** Pickup prompt near the bottom centre; null hides it. */
+  prompt(text: string | null): void {
+    this.el.prompt.style.display = text === null ? 'none' : 'block';
+    if (text !== null) this.set(this.el.prompt, text);
   }
 
   deathScreen(show: boolean, main = '', sub = ''): void {

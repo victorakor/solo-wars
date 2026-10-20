@@ -3,7 +3,10 @@ import type { Box } from '../collision';
 export interface SceneDef {
   id: string; name: string; bounds: { x: number; z: number };
   boxes: Box[]; spawns: { x: number; y: number; z: number; yaw: number }[];
+  /** Floor weapon pads. Mirrored pads share a `pair` so they roll the same item each cycle. */
+  pads: PadDef[];
 }
+export interface PadDef { x: number; y: number; z: number; pair: number }
 const b = (kind: string, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): Box =>
   ({ kind, min: { x: x0, y: y0, z: z0 }, max: { x: x1, y: y1, z: z1 } });
 
@@ -46,5 +49,12 @@ export const FOUNDRY: SceneDef = {
     // two more mirrored pairs (point symmetry through the centre), aimed at the middle of the arena
     { x: -24, y: 0, z: 10, yaw: Math.atan2(-24, 10) }, { x: 24, y: 0, z: -10, yaw: Math.atan2(24, -10) },
     { x: -8, y: 0, z: 14, yaw: Math.atan2(-8, 14) }, { x: 8, y: 0, z: -14, yaw: Math.atan2(8, -14) },
+  ],
+  // three mirrored pairs plus the centre; each pair rolls the same item so neither side is favoured
+  pads: [
+    { x: -10, y: 0, z: 8, pair: 0 }, { x: 10, y: 0, z: -8, pair: 0 },
+    { x: -8, y: 0, z: -12, pair: 1 }, { x: 8, y: 0, z: 12, pair: 1 },
+    { x: -20, y: 0, z: -14, pair: 2 }, { x: 20, y: 0, z: 14, pair: 2 },
+    { x: 0, y: 0, z: 0, pair: 3 },
   ],
 };

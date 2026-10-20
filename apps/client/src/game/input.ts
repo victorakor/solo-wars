@@ -1,8 +1,8 @@
 import { idleInput, type ActorInput } from '@arena/shared';
 
-export type Command = 'bot' | 'botLevel' | 'reset' | 'ammo' | 'repeat';
+export type Command = 'addBot' | 'removeBot' | 'botLevel' | 'reset' | 'repeat';
 
-const COMMANDS: Record<string, Command> = { KeyB: 'bot', KeyN: 'botLevel', KeyV: 'reset', KeyU: 'ammo', KeyH: 'repeat' };
+const COMMANDS: Record<string, Command> = { KeyB: 'addBot', KeyK: 'removeBot', KeyN: 'botLevel', KeyV: 'reset', KeyH: 'repeat' };
 
 /**
  * Trigger flags for one tick. With `repeat`, holding the button counts as a fresh press every tick, so
@@ -15,7 +15,8 @@ export function fireFlags(held: boolean, latch: boolean, repeat: boolean): { fir
 /**
  * Desktop input. Nothing is read unless `enabled` (set while the mouse is captured), and the input
  * never captures the mouse itself: that is MouseCapture's job, started only from Play/Resume.
- * WASD move, Shift sprint, Space jump, C crouch, Q roll, LMB fire, RMB aim, R reload, 1-5 / wheel weapons.
+ * WASD move, Shift sprint, Space jump, C crouch, Q roll, LMB fire, RMB aim, R reload, 1-2 / wheel switch weapon,
+ * E pick up or swap, X drop the floor weapon.
  */
 export class DesktopInput {
   yaw = 0; pitch = 0.15; sens = 0.0022;
@@ -25,6 +26,7 @@ export class DesktopInput {
   private enabled = false;
   private keys = new Set<string>();
   private dodgeLatch = false; private reloadLatch = false; private fireLatch = false;
+  private interactLatch = false; private dropLatch = false;
   private fireHeld = false; private ads = false;
   private slotKey: number | null = null; private wheel = 0;
 
@@ -34,6 +36,8 @@ export class DesktopInput {
       this.keys.add(e.code);
       if (e.code === 'KeyQ') this.dodgeLatch = true;
       if (e.code === 'KeyR') this.reloadLatch = true;
+      if (e.code === 'KeyE') this.interactLatch = true;
+      if (e.code === 'KeyX') this.dropLatch = true;
       if (e.code === 'Space') e.preventDefault();
       const n = e.code.startsWith('Digit') ? Number(e.code.slice(5)) : 0;
       if (n >= 1 && n <= 9) this.slotKey = n - 1;
@@ -69,6 +73,7 @@ export class DesktopInput {
   private clear(): void {
     this.keys.clear();
     this.dodgeLatch = this.reloadLatch = this.fireLatch = this.fireHeld = this.ads = false;
+    this.interactLatch = this.dropLatch = false;
     this.slotKey = null; this.wheel = 0;
   }
 
@@ -82,10 +87,10 @@ export class DesktopInput {
     out.dodge = this.dodgeLatch; out.ads = this.ads;
     const f = fireFlags(this.fireHeld, this.fireLatch, this.holdToFire);
     out.fire = f.fire; out.firePressed = f.firePressed;
-    out.reload = this.reloadLatch;
+    out.reload = this.reloadLatch; out.interact = this.interactLatch; out.drop = this.dropLatch;
     if (this.slotKey !== null) out.slot = this.slotKey;
     else if (this.wheel !== 0 && count > 0) out.slot = (((slot + this.wheel) % count) + count) % count;
-    this.dodgeLatch = this.reloadLatch = this.fireLatch = false;
+    this.dodgeLatch = this.reloadLatch = this.fireLatch = this.interactLatch = this.dropLatch = false;
     this.slotKey = null; this.wheel = 0;
     return out;
   }

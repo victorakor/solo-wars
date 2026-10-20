@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import {
-  BOT_PROFILES, COMBAT, DEG, FOUNDRY, SIM, TRAINING_RACK, WEAPONS, BOT_ID, PLAYER_ID, BotBrain, CollisionWorld,
-  addBot, clonePlayer, convergeAim, createTraining, currentSpreadDeg, eyeHeightOf, motionOf,
-  type Actor, type ActorInput, type BotLevel, type CombatEvent, type PlayerState, type Training,
+  BOT_PROFILES, COMBAT, DEG, FOUNDRY, RARITY, SIM, TRAINING_RACK, WEAPONS, PLAYER_ID, BotBrain, CollisionWorld,
+  addBot, clonePlayer, convergeAim, createTraining, currentSpreadDeg, eyeHeightOf, floorSlot, motionOf,
+  type Actor, type ActorInput, type CombatEvent, type PlayerState, type Training, type WeaponState,
 } from '@arena/shared';
 import { computeCamera, fovDeg, newRig, CAMERA } from './camera';
 import type { MouseCapture } from './capture';
@@ -10,6 +10,8 @@ import { Character } from './character';
 import { HealthBar } from './healthbar';
 import type { Hud } from './hud';
 import { DesktopInput, type Command } from './input';
+import { MAX_BOTS, type MenuConfig } from './menu';
+import { PickupViews } from './pickupViews';
 import { buildScene } from './scene';
 import { Vfx } from './vfx';
 
@@ -21,15 +23,23 @@ interface ActorView {
   deadT: number;
 }
 
-const LEVELS: BotLevel[] = ['easy', 'medium', 'hard'];
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+const slotLabel = (w: WeaponState, floor: boolean): string => {
+  const name = `${floor ? `${RARITY[w.rarity]?.name ?? ''} ` : ''}${WEAPONS[w.id].name}`;
+  return `${name} ${w.reserve === Infinity ? '∞' : `${w.mag}/${w.reserve}`}`;
+};
 
 export interface GameHandle {
-  /** Rebuilds the training range from scratch (menu "Reset range" and V). */
-  reset(): void;
+  /** Starts a fresh fight from the current menu config. */
+  apply(): void;
+  /** Sets the weapon you will respawn with (immediately if you are dead). */
+  setWeapon(id: (typeof TRAINING_RACK)[number]): void;
+  addBot(): void;
+  removeBot(): void;
+  botCount(): number;
 }
 
-export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCapture): GameHandle {
+export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCapture, cfg: MenuConfig, onCfg: () => void): GameHandle {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.shadowMap.enabled = true;
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -38,16 +48,15 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
   buildScene(FOUNDRY, scene);
   const world = new CollisionWorld(FOUNDRY.boxes);
   const vfx = new Vfx(scene);
+  const pickupViews = new PickupViews(scene);
   const input = new DesktopInput(canvas);
   const resize = (): void => { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); };
   addEventListener('resize', resize); resize();
   capture.onChange(() => input.setEnabled(capture.playing));
 
   // --- session state ---------------------------------------------------------
-  let infiniteAmmo = true;
-  let botLevel: BotLevel = 'medium';
-  let t: Training = createTraining(1, infiniteAmmo);
-  let brain: BotBrain | null = null;
+  let t: Training = createTraining(1, { weapon: cfg.weapon });
+  const brains = new Map<string, BotBrain>();
   const views = new Map<string, ActorView>();
   let killer = '';
   let last = { text: 'none yet', ttk: '' };
@@ -55,7 +64,7 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
   let accum = 0;
 
   const makeView = (a: Actor): void => {
-    const palette = a.kind === 'dummy' ? [0xb04a3a, 0xf0e0c0] : a.kind === 'bot' ? [0x6a3a8a, 0xe8b04a] : [0x2f6fb5, 0xe8b04a];
+    const palette = a.kind === 'bot' ? [0x6a3a8a, 0xe8b04a] : [0x2f6fb5, 0xe8b04a];
     const character = new Character(palette[0], palette[1]);
     scene.add(character.root);
     const bar = a.kind === 'player' ? null : new HealthBar();
@@ -69,40 +78,46 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
     if (v.bar) scene.remove(v.bar.root);
     views.delete(id);
   };
-  const rebuild = (): void => {
+  const spawnBot = (): void => {
+    const bots = t.sim.actors.filter((a) => a.kind === 'bot').length;
+    if (bots >= MAX_BOTS) { hud.feed(`Bot limit reached (${MAX_BOTS})`, false); return; }
+    const a = addBot(t, cfg.level);
+    makeView(a);
+    brains.set(a.id, new BotBrain(BOT_PROFILES[cfg.level], Math.floor(Math.random() * 1e9), a.view.yaw));
+    hud.feed(`${a.name} joined with the ${WEAPONS[a.rack[0]!.id].name}`, false);
+  };
+  const removeBot = (): void => {
+    const bots = t.sim.actors.filter((a) => a.kind === 'bot');
+    const b = bots[bots.length - 1];
+    if (!b) { hud.feed('No bots to remove', false); return; }
+    t.sim.removeActor(b.id); dropView(b.id); brains.delete(b.id);
+    hud.feed(`${b.name} left`, false);
+  };
+  const apply = (): void => {
     for (const id of [...views.keys()]) dropView(id);
-    t = createTraining(1 + Math.floor(Math.random() * 1e6), infiniteAmmo);
-    brain = null;
+    brains.clear();
+    pickupViews.clear();
+    t = createTraining(1 + Math.floor(Math.random() * 1e6), { weapon: cfg.weapon });
     for (const a of t.sim.actors) makeView(a);
+    for (let i = 0; i < cfg.bots; i++) spawnBot();
     input.yaw = t.player.view.yaw; input.pitch = 0.1;
     firstHit.clear(); killer = ''; last = { text: 'none yet', ttk: '' };
     hud.deathScreen(false);
   };
-  rebuild();
+  apply();
 
-  const toggleBot = (): void => {
-    if (t.sim.actor(BOT_ID)) { t.sim.removeActor(BOT_ID); dropView(BOT_ID); brain = null; hud.feed('Bot removed', false); return; }
-    const a = addBot(t, botLevel, infiniteAmmo);
-    makeView(a);
-    brain = new BotBrain(BOT_PROFILES[botLevel], Math.floor(Math.random() * 1e9), a.view.yaw);
-    hud.feed(`Bot added (${botLevel})`, false);
+  const setWeapon = (id: (typeof TRAINING_RACK)[number]): void => {
+    cfg.weapon = id;
+    t.player.loadout = [id]; // applied when you next respawn (the sim rebuilds your rack from this)
+    onCfg();
   };
-  const cycleLevel = (): void => {
-    botLevel = LEVELS[(LEVELS.indexOf(botLevel) + 1) % LEVELS.length]!;
-    const a = t.sim.actor(BOT_ID);
-    if (a) { a.name = `Bot (${botLevel})`; brain = new BotBrain(BOT_PROFILES[botLevel], Math.floor(Math.random() * 1e9), a.view.yaw); }
-    hud.feed(`Bot level: ${botLevel}`, false);
-  };
+
   input.onCommand = (c: Command): void => {
-    if (c === 'bot') toggleBot();
-    else if (c === 'botLevel') cycleLevel();
-    else if (c === 'reset') rebuild();
+    if (c === 'addBot') spawnBot();
+    else if (c === 'removeBot') removeBot();
+    else if (c === 'botLevel') { cfg.level = cfg.level === 'easy' ? 'medium' : cfg.level === 'medium' ? 'hard' : 'easy'; hud.feed(`New bots will be ${cfg.level}`, false); onCfg(); }
+    else if (c === 'reset') apply();
     else if (c === 'repeat') { input.holdToFire = !input.holdToFire; hud.feed(input.holdToFire ? 'Hold to fire: on (all weapons)' : 'Hold to fire: off (one click per shot for non-auto)', false); }
-    else if (c === 'ammo') {
-      infiniteAmmo = !infiniteAmmo;
-      for (const a of t.sim.actors) if (a.kind !== 'dummy') t.sim.restock(a, infiniteAmmo);
-      hud.feed(infiniteAmmo ? 'Ammo: infinite reserve (restocked)' : 'Ammo: floor reserves (restocked)', false);
-    }
   };
 
   // --- events ---------------------------------------------------------------
@@ -156,6 +171,12 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
         if (e.victim === me.id) killer = nameOf(e.killer);
         break;
       }
+      case 'pickup':
+        if (e.actor === me.id) hud.feed(`Picked up ${RARITY[e.rarity]?.name ?? ''} ${WEAPONS[e.weapon].name}`, false);
+        break;
+      case 'weaponEmpty':
+        if (e.actor === me.id) hud.feed('Floor weapon empty: back to your own weapon', false);
+        break;
       case 'respawn': {
         const v = views.get(e.actor);
         if (v) v.deadT = -1;
@@ -185,7 +206,13 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
 
   const tick = (): void => {
     const me = t.player;
-    const mine = input.sample(me.slot, me.rack.length);
+    // while dead the number keys choose the weapon for your next life; the wheel is ignored
+    const mine = input.sample(me.slot, me.hp.alive ? me.rack.length : 0);
+    if (!me.hp.alive && mine.slot !== null) {
+      const id = TRAINING_RACK[mine.slot];
+      if (id) setWeapon(id);
+      mine.slot = null;
+    }
     if (me.hp.alive) {
       // the camera sits beside and behind the eye: aim the bullet through whatever the crosshair is on
       const ws = me.rack[me.slot]!;
@@ -196,8 +223,10 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
     }
     inputs.clear();
     inputs.set(me.id, mine);
-    const bot = t.sim.actor(BOT_ID);
-    if (bot && brain) inputs.set(bot.id, brain.think(bot, me, world, dt));
+    for (const [id, brain] of brains) {
+      const bot = t.sim.actor(id);
+      if (bot) inputs.set(id, brain.think(bot, t.sim.actors, world, dt, t.sim.pickups));
+    }
     t.sim.step(dt, inputs);
     for (const e of t.sim.drainEvents()) handle(e);
   };
@@ -219,15 +248,16 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
       if (!v) continue;
       syncPose(a, v, alpha);
       if (v.deadT >= 0) v.deadT += capture.playing ? real : 0;
-      const wdef = WEAPONS[a.rack[a.slot]!.id];
-      v.character.setWeapon(a.kind === 'dummy' ? null : wdef.modelId);
+      const cur = a.rack[a.slot]!;
+      v.character.setWeapon(WEAPONS[cur.id].modelId);
       v.character.update(v.pose, a.id === me.id ? input.yaw : a.view.yaw, capture.playing ? real : 0, {
-        armed: a.kind !== 'dummy', pitch: a.id === me.id ? input.pitch : a.view.pitch,
-        reloading: a.rack[a.slot]!.reloading, deadT: a.hp.alive ? -1 : Math.max(0, v.deadT),
+        armed: true, pitch: a.id === me.id ? input.pitch : a.view.pitch,
+        reloading: cur.reloading, deadT: a.hp.alive ? -1 : Math.max(0, v.deadT),
       });
       if (v.bar) v.bar.update(tmpP.set(v.pose.pos.x, v.pose.pos.y + 2.25, v.pose.pos.z), a.hp.hp / COMBAT.maxHealth, camera, a.hp.alive);
     }
     vfx.update(capture.playing ? real : 0);
+    pickupViews.update(t.sim.pickups, capture.playing ? real : 0, now / 1000);
 
     // camera: over-the-shoulder, with recoil and aim zoom
     const mv = views.get(me.id)!.pose;
@@ -244,32 +274,41 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
     // HUD
     const spread = currentSpreadDeg(def, ws.adsT, motionOf(me.body));
     const gapPx = (Math.tan(spread * DEG) / Math.tan((fov * DEG) / 2)) * (innerHeight / 2);
+    const fi = floorSlot(me);
     hud.update({
       hp: me.hp.hp, alive: me.hp.alive, protectedNow: me.hp.protectT > 0, stamina: me.body.stamina, rollCd: Math.max(0, me.body.rollCd),
-      weaponName: def.name, mag: ws.mag, reserve: ws.reserve, magSize: def.magSize,
+      weaponName: `${RARITY[ws.rarity]?.name === 'Common' ? '' : `${RARITY[ws.rarity]?.name} `}${def.name}`,
+      mag: ws.mag, reserve: ws.reserve, magSize: ws.magSize,
       reloadFrac: ws.reloading ? 1 - clamp(ws.reloadT / def.reloadSec, 0, 1) : -1,
-      slots: me.rack.map((w, i) => ({ label: WEAPONS[w.id].name, active: i === me.slot })), gapPx, scoped,
+      slots: me.rack.map((w, i) => ({ label: slotLabel(w, i === fi), active: i === me.slot })), gapPx, scoped,
       debug: `${fps.toFixed(0)} fps · spread ${spread.toFixed(2)}° · recoil ${(me.recoil.pitch / DEG).toFixed(1)}° · pos ${me.body.pos.x.toFixed(1)}, ${me.body.pos.z.toFixed(1)}`,
     });
+    const near = me.hp.alive && me.nearPickup !== null ? t.sim.pickups.find((p) => p.id === me.nearPickup) : undefined;
+    hud.prompt(near?.state && fi >= 0 ? `[E] swap for ${RARITY[near.state.rarity]?.name} ${WEAPONS[near.state.id].name} (${near.state.mag}/${near.state.reserve})` : null);
+
+    const board = [...t.sim.actors].sort((a, b) => b.stats.kills - a.stats.kills || a.stats.deaths - b.stats.deaths).slice(0, 6)
+      .map((a) => `${a.id === me.id ? '▶ ' : '   '}${a.name}  ${a.stats.kills} / ${a.stats.deaths}`);
     const s = me.stats;
     hud.train([
+      'Kills / deaths', ...board, '',
       `Shots ${s.shotsFired} · Hits ${s.shotsHit} (${s.shotsFired ? Math.round((100 * s.shotsHit) / s.shotsFired) : 0}%) · Head ${s.headshots}`,
-      `Kills ${s.kills} · Deaths ${s.deaths} · Streak ${s.streak} (best ${s.bestStreak})`,
-      `Damage dealt ${s.damageDealt.toFixed(0)} · taken ${s.damageTaken.toFixed(0)}`,
       `Last hit: ${last.text}`,
       last.ttk ? `Last time-to-kill: ${last.ttk}` : 'Last time-to-kill: n/a',
-      `Ammo: ${infiniteAmmo ? 'infinite reserve' : 'floor reserves'} · Bot: ${t.sim.actor(BOT_ID) ? botLevel : 'off'}`,
-      `Hold to fire: ${input.holdToFire ? 'on' : 'off'} (H)`,
+      `Hold to fire: ${input.holdToFire ? 'on' : 'off'} (H) · Bots: ${brains.size} · new bots: ${cfg.level}`,
     ]);
     if (me.hp.alive) hud.deathScreen(false);
-    else hud.deathScreen(true, killer ? `Eliminated by ${killer}` : 'Eliminated', `Respawning in ${Math.max(0, me.hp.respawnT).toFixed(1)} s`);
+    else {
+      const choices = TRAINING_RACK.map((id, i) => `${i + 1} ${WEAPONS[id].name}`).join(' · ');
+      hud.deathScreen(true, killer ? `Eliminated by ${killer}` : 'Eliminated',
+        `Respawning in ${Math.max(0, me.hp.respawnT).toFixed(1)} s · next weapon: ${WEAPONS[me.loadout[0]!].name} · press ${choices}`);
+    }
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
 
   // read-only view of the sim for e2e tests and debugging
   (window as unknown as Record<string, unknown>).__game = {
-    state: () => t.player.body, sim: () => t.sim, rack: TRAINING_RACK, player: PLAYER_ID, capture: () => capture.state,
+    state: () => t.player.body, sim: () => t.sim, player: PLAYER_ID, capture: () => capture.state,
   };
-  return { reset: rebuild };
+  return { apply, setWeapon, addBot: spawnBot, removeBot, botCount: () => brains.size };
 }

@@ -84,6 +84,16 @@
       #menu button:hover { background: #32414f; }
       #menu button.primary { background: #c98a1e; border-color: #e8b04a; color: #151008; font-weight: 700; }
       #menu button.primary:hover { background: #e8a52a; }
+      #menu h3 { margin: 14px 0 6px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; opacity: .7; }
+      #cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 8px; }
+      #cards button.card { margin: 0; padding: 8px 4px; text-align: center; font-size: 13px; line-height: 1.35; }
+      #cards button.card small { display: block; opacity: .7; font-size: 11px; }
+      #cards button.card.on { background: #c98a1e; border-color: #e8b04a; color: #151008; }
+      #menu .row { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; flex-wrap: wrap; }
+      #menu .row button { margin: 0; padding: 6px 12px; font-size: 14px; }
+      #menu .row b { min-width: 1.6em; text-align: center; }
+      #prompt { left: 50%; bottom: 22%; transform: translateX(-50%); display: none; background: #000a; padding: 6px 14px; border: 1px solid #fff4; font-size: 15px; }
+      #switchhint { opacity: .6; font-size: 11px; margin-top: 4px; }
       #menu .keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 12px 0; opacity: .85; }
       #menu .note { opacity: .7; line-height: 1.5; margin: 12px 0 0; border-top: 1px solid #fff2; padding-top: 12px; }
     </style>
@@ -107,12 +117,15 @@
       <div id="ammo"></div>
       <div id="reload"><i style="width:0%"></i></div>
       <div id="slots"></div>
+      <div id="switchhint">Switch: <kbd>1</kbd> <kbd>2</kbd> or wheel · <kbd>E</kbd> pick up / swap · <kbd>X</kbd> drop</div>
     </div>
+    <div id="prompt" class="fx"></div>
     <div id="feed" class="fx"></div>
-    <div id="train" class="fx"><h4>Training range</h4><div id="trainbody"></div></div>
+    <div id="train" class="fx"><h4>Free-for-all</h4><div id="trainbody"></div></div>
     <div id="help" class="fx">
       <kbd>Esc</kbd> or <kbd>P</kbd> release mouse · WASD move · Shift sprint · Space jump · C crouch · Q roll<br />
-      LMB fire · RMB aim · R reload · 1-5 / wheel weapon · <kbd>B</kbd> bot · <kbd>N</kbd> bot level · <kbd>U</kbd> ammo mode · <kbd>H</kbd> hold-to-fire · <kbd>V</kbd> reset
+      LMB fire · RMB aim · R reload · <kbd>1</kbd>/<kbd>2</kbd>/wheel switch weapon · <kbd>E</kbd> pick up / swap · <kbd>X</kbd> drop<br />
+      <kbd>B</kbd> add bot · <kbd>K</kbd> remove bot · <kbd>N</kbd> bot level · <kbd>H</kbd> hold-to-fire · <kbd>V</kbd> restart
     </div>
     <div id="dbg" class="fx"></div>
     <div id="respawn" class="fx"><div id="respawnmain"></div><small id="respawnsub"></small></div>
@@ -122,17 +135,30 @@
         <h1 id="menu-title">Arena Duel</h1>
         <p class="sub" id="menu-sub">Training range</p>
         <div class="err" id="menu-error"></div>
-        <button id="btn-resume" class="primary">Play</button>
-        <button id="btn-reset">Reset range</button>
-        <button id="btn-quit">Quit to start screen</button>
+        <h3>Your weapon</h3>
+        <div id="cards"></div>
+        <div class="row">
+          Bots at start <button id="bots-minus">-</button><b id="bots-n">3</b><button id="bots-plus">+</button>
+          &nbsp; Difficulty <button id="level">Medium</button>
+        </div>
+        <div class="row" id="live-bots">
+          Bots now <button id="live-minus">- Bot</button><button id="live-plus">+ Bot</button>
+        </div>
+        <div style="margin-top:10px">
+          <button id="btn-resume" class="primary">Play</button>
+          <button id="btn-reset">Restart with these settings</button>
+          <button id="btn-quit">Quit to start screen</button>
+        </div>
+        <h3>Controls</h3>
         <div class="keys">
           <span><kbd>Esc</kbd> / <kbd>P</kbd></span><span>release the mouse and open this menu</span>
           <span>WASD · Shift · Space</span><span>move · sprint · jump (C crouch, Q roll)</span>
-          <span>LMB / RMB</span><span>fire / aim down sights (R reload)</span>
-          <span>1-5 or wheel</span><span>Sidearm, Rattler, Vanguard, Breaker, Longshot</span>
-          <span>B / N</span><span>add or remove the bot / cycle its difficulty</span>
-          <span>U / V</span><span>toggle infinite or floor ammo / reset the range</span>
-          <span>H</span><span>hold-to-fire on or off (hold LMB to keep firing any weapon)</span>
+          <span>LMB / RMB</span><span>fire (hold to keep firing) / aim down sights, R reload</span>
+          <span><kbd>1</kbd> <kbd>2</kbd> / wheel</span><span>switch between your weapon and a picked-up one</span>
+          <span><kbd>E</kbd> / <kbd>X</kbd></span><span>swap with the weapon you stand on / drop yours</span>
+          <span>B / K / N</span><span>add a bot / remove a bot / cycle bot difficulty</span>
+          <span>H / V</span><span>hold-to-fire on or off / restart</span>
+          <span>While dead</span><span><kbd>1</kbd>-<kbd>5</kbd> choose your weapon for the next life</span>
         </div>
         <p class="note">
           Your mouse is only captured after you press <b>Play</b> or <b>Resume</b>, and you can always get it back

@@ -18,5 +18,11 @@ addEventListener('keydown', (e) => {
 });
 
 const menu = new Menu(capture);
-const game = startGame(canvas, new Hud(), capture);
-menu.onReset = game.reset;
+const game = startGame(canvas, new Hud(), capture, menu.config, () => menu.render());
+menu.handlers = {
+  apply: game.apply,
+  weaponChanged: game.setWeapon,
+  addBot: game.addBot,
+  removeBot: game.removeBot,
+  botCount: game.botCount,
+};

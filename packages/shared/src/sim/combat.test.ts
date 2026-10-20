@@ -75,6 +75,15 @@ describe('Foundry training range', () => {
     for (const s of FOUNDRY.spawns)
       expect(FOUNDRY.spawns.some((m) => Math.abs(m.x + s.x) < 1e-9 && Math.abs(m.z + s.z) < 1e-9)).toBe(true);
   });
+  it('has seven pickup pads clear of geometry, mirrored in pairs through the centre', () => {
+    expect(FOUNDRY.pads).toHaveLength(7);
+    for (const p of FOUNDRY.pads) {
+      const m = FOUNDRY.pads.find((q) => Math.abs(q.x + p.x) < 1e-9 && Math.abs(q.z + p.z) < 1e-9);
+      expect(m).toBeDefined();
+      expect(m!.pair).toBe(p.pair);
+    }
+    expect(new Set(FOUNDRY.pads.map((p) => p.pair)).size).toBe(4);
+  });
   it('spawns face the middle of the arena', () => {
     for (const s of FOUNDRY.spawns) {
       const fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw);
@@ -82,7 +91,7 @@ describe('Foundry training range', () => {
     }
   });
   it('dummies stand clear of geometry, at the stated distances, in line of sight of the player', () => {
-    const t = createTraining(1);
+    const t = createTraining(1, { dummies: true });
     const w = new CollisionWorld(FOUNDRY.boxes);
     expect(t.sim.actors).toHaveLength(1 + DUMMY_DISTANCES.length);
     const eye = { x: t.player.body.pos.x, y: 1.6, z: t.player.body.pos.z };

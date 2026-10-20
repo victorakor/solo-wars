@@ -1,4 +1,4 @@
-import { COMBAT, DEG, WEAPONS, type WeaponDef, type WeaponId } from '../balance';
+import { COMBAT, DEG, RARITY, WEAPONS, type WeaponDef, type WeaponId } from '../balance';
 import type { Vec3 } from '../collision';
 import type { PlayerState } from '../movement';
 import type { Rng } from './rng';
@@ -7,6 +7,12 @@ import type { Rng } from './rng';
 export interface WeaponState {
   id: WeaponId;
   mag: number;
+  /** Magazine capacity. Rare and Epic floor weapons carry bigger magazines than the base definition. */
+  magSize: number;
+  /** 0 Common, 1 Rare, 2 Epic. */
+  rarity: number;
+  /** Damage multiplier from rarity. */
+  dmgMult: number;
   reserve: number;
   /** Seconds until the next shot is allowed. Slightly negative values carry over so rpm is exact. */
   cooldown: number;
@@ -23,10 +29,12 @@ export interface WeaponState {
 export type FireResult = 'fired' | 'dry' | 'blocked' | 'idle';
 export type WeaponEvent = 'reloadDone' | 'shellLoaded' | null;
 
-export function newWeapon(id: WeaponId, infiniteReserve = false): WeaponState {
+export function newWeapon(id: WeaponId, infiniteReserve = false, rarity = 0): WeaponState {
   const def = WEAPONS[id];
+  const r = RARITY[rarity] ?? RARITY[0];
   const reserve = infiniteReserve || def.reserveAmmo === null ? Infinity : def.reserveAmmo;
-  return { id, mag: def.magSize, reserve, cooldown: 0, reloading: false, reloadT: 0, equipT: 0, adsT: 0, buffer: 0 };
+  const magSize = Math.round(def.magSize * r.mag);
+  return { id, mag: magSize, magSize, rarity, dmgMult: r.dmg, reserve, cooldown: 0, reloading: false, reloadT: 0, equipT: 0, adsT: 0, buffer: 0 };
 }
 
 export function cancelReload(ws: WeaponState): void {
@@ -44,7 +52,7 @@ export function equipWeapon(ws: WeaponState, def: WeaponDef): void {
 
 /** Returns true when a reload actually started. */
 export function startReload(ws: WeaponState, def: WeaponDef): boolean {
-  if (ws.reloading || ws.equipT > 0 || ws.mag >= def.magSize || ws.reserve <= 0) return false;
+  if (ws.reloading || ws.equipT > 0 || ws.mag >= ws.magSize || ws.reserve <= 0) return false;
   ws.reloading = true;
   ws.reloadT = def.reloadSec;
   return true;
@@ -70,12 +78,12 @@ export function stepWeapon(ws: WeaponState, def: WeaponDef, dt: number, wantAds:
   if (def.reloadPerShell) {
     ws.mag += 1;
     ws.reserve -= 1;
-    if (ws.mag < def.magSize && ws.reserve > 0) {
+    if (ws.mag < ws.magSize && ws.reserve > 0) {
       ws.reloadT += def.reloadSec;
       return 'shellLoaded';
     }
   } else {
-    const take = Math.min(def.magSize - ws.mag, ws.reserve);
+    const take = Math.min(ws.magSize - ws.mag, ws.reserve);
     ws.mag += take;
     ws.reserve -= take;
   }
