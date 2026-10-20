@@ -223,6 +223,12 @@ export class CombatSim {
       }
       this.stepAlive(a, inputs.get(a.id) ?? IDLE_INPUT, dt);
     }
+    // a pickup in reach can be taken by someone else later in the tick, or its owner can die on it
+    for (const a of this.actors) {
+      if (a.nearPickup === null) continue;
+      const p = this.pickups.find((q) => q.id === a.nearPickup);
+      if (!a.hp.alive || !p || !p.state) a.nearPickup = null;
+    }
   }
 
   private respawn(a: Actor): void {
@@ -414,7 +420,10 @@ export class CombatSim {
     victim.stats.streak = 0;
     for (const w of victim.rack) { cancelReload(w); w.adsT = 0; }
     const fi = victim.loadout.length;
-    if (PICKUPS.dropOnDeath && victim.rack.length > fi) this.dropWeapon(victim, victim.rack.splice(fi, 1)[0]!, false);
+    if (PICKUPS.dropOnDeath && victim.rack.length > fi) {
+      this.dropWeapon(victim, victim.rack.splice(fi, 1)[0]!, false);
+      if (victim.slot >= fi) victim.slot = 0; // the selected weapon just left the rack
+    }
     resetRecoil(victim.recoil);
     const killerId = creditKiller(victim.hp, direct?.id ?? null, this.time);
     const killer = killerId === null ? undefined : this.actor(killerId);

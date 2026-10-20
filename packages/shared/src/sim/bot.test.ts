@@ -160,6 +160,7 @@ describe('free-for-all', () => {
       t.sim.step(DT, inputs);
       t.sim.drainEvents();
       for (const a of t.sim.actors) {
+        if (!a.rack[a.slot]) throw new Error(`seed ${seed}: ${a.name} has no weapon in slot ${a.slot}`);
         const p = a.body.pos;
         if (!Number.isFinite(p.x + p.y + p.z)) throw new Error(`NaN position seed ${seed}`);
         if (Math.abs(p.x) > 30 || Math.abs(p.z) > 22 || p.y < -1) throw new Error(`out of bounds seed ${seed}: ${p.x},${p.y},${p.z}`);

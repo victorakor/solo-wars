@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { PICKUPS, RARITY, WEAPONS } from '../balance';
+import { BOT_PROFILES, PICKUPS, RARITY, TRAINING_RACK, WEAPONS } from '../balance';
 import { FOUNDRY } from '../scenes/foundry';
 import { validateScene } from '../scenes/validate';
+import { BotBrain } from './bot';
+import { mulberry32 } from './rng';
+import { addBot, createTraining } from './training';
 import { CombatSim, floorSlot, rollPad, type Actor, type ActorInput, type CombatEvent } from './sim';
 import { DT, anglesTo, eyeOf, flatWorld, inputOf, one, run, spawnAt, SPAWN } from './testkit';
 
@@ -210,6 +213,14 @@ describe('drop on death', () => {
     expect(floorSlot(you)).toBe(-1); // the floor weapon is gone, the loadout weapon is back and full
     expect(you.rack[0]!.mag).toBe(30);
   });
+  it('the dead keep a valid selected weapon (regression: slot pointed at the dropped floor weapon and froze the client)', () => {
+    const { sim, you, foe } = duel();
+    expect(you.slot).toBe(1); // holding the floor weapon when killed
+    killYou(sim, you, foe);
+    expect(you.hp.alive).toBe(false);
+    expect(you.rack[you.slot]).toBeDefined();
+    expect(you.slot).toBe(0);
+  });
   it('another player can pick the dropped weapon up', () => {
     const { sim, you, foe } = duel();
     killYou(sim, you, foe);
@@ -223,5 +234,39 @@ describe('drop on death', () => {
 describe('Foundry pads', () => {
   it('scene validates with pads', () => {
     expect(validateScene(FOUNDRY)).toEqual([]);
+  });
+});
+
+describe('state invariants under chaos', () => {
+  it('random inputs plus bots for 3 minutes never leave an actor with an invalid weapon, ammo or slot', () => {
+    for (const seed of [1, 2, 3]) {
+      const t = createTraining(seed);
+      const bots = [addBot(t, 'hard'), addBot(t, 'medium'), addBot(t, 'hard'), addBot(t, 'easy')];
+      const brains = new Map(bots.map((b, i) => [b.id, new BotBrain(BOT_PROFILES.hard, seed * 10 + i, b.view.yaw)]));
+      const rng = mulberry32(seed);
+      for (let i = 0; i < 180 * 60; i++) {
+        const inputs = new Map<string, ActorInput>();
+        for (const b of bots) inputs.set(b.id, brains.get(b.id)!.think(b, t.sim.actors, t.sim.world, DT, t.sim.pickups));
+        // a flailing human: random movement, fire, reload, swap, drop, slot changes and weapon choices
+        const r = () => rng() < 0.05;
+        inputs.set('you', inputOf({
+          moveX: Math.round(rng() * 2 - 1), moveZ: Math.round(rng() * 2 - 1), yaw: rng() * 6.28, jump: r(), sprint: r(), crouch: r(), dodge: r(),
+          fire: rng() < 0.5, firePressed: rng() < 0.3, reload: r(), interact: rng() < 0.1, drop: rng() < 0.02, ads: r(),
+          slot: rng() < 0.1 ? Math.floor(rng() * 4) : null,
+        }));
+        if (!t.player.hp.alive && rng() < 0.02) t.player.loadout = [TRAINING_RACK[Math.floor(rng() * 5)]!];
+        t.sim.step(DT, inputs);
+        t.sim.drainEvents();
+        for (const a of t.sim.actors) {
+          const w = a.rack[a.slot];
+          if (!w) throw new Error(`seed ${seed} tick ${i}: ${a.name} has no weapon in slot ${a.slot} (rack ${a.rack.length}, alive ${a.hp.alive})`);
+          if (a.rack.length > a.loadout.length + 1) throw new Error(`seed ${seed}: ${a.name} has ${a.rack.length} weapons`);
+          for (const x of a.rack) if (x.mag < 0 || x.mag > x.magSize || x.reserve < 0 || Number.isNaN(x.reserve)) throw new Error(`seed ${seed}: bad ammo ${x.id} ${x.mag}/${x.reserve}`);
+          if (a.nearPickup !== null && !t.sim.pickups.some((p) => p.id === a.nearPickup && p.state !== null)) throw new Error(`seed ${seed}: ${a.name} is near a pickup that is gone or empty`);
+          const p = a.body.pos;
+          if (!Number.isFinite(p.x + p.y + p.z) || p.y < -1) throw new Error(`seed ${seed}: ${a.name} bad position`);
+        }
+      }
+    }
   });
 });

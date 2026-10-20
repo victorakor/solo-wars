@@ -231,7 +231,17 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
     for (const e of t.sim.drainEvents()) handle(e);
   };
 
+  const reported = new Set<string>();
   const frame = (now: number): void => {
+    requestAnimationFrame(frame); // queued first so one bad frame can never freeze the game
+    try {
+      frameBody(now);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!reported.has(msg)) { reported.add(msg); console.error('frame error:', err); hud.feed(`Internal error: ${msg}`, false); }
+    }
+  };
+  const frameBody = (now: number): void => {
     const real = Math.min(0.1, (now - prevTime) / 1000); prevTime = now;
     fps += (1 / Math.max(real, 1e-3) - fps) * 0.05;
     if (capture.playing) {
@@ -241,14 +251,14 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
 
     const me = t.player;
     const alpha = accum / dt;
-    const ws = me.rack[me.slot]!;
+    const ws = me.rack[me.slot] ?? me.rack[0]!;
     const def = WEAPONS[ws.id];
     for (const a of t.sim.actors) {
       const v = views.get(a.id);
       if (!v) continue;
       syncPose(a, v, alpha);
       if (v.deadT >= 0) v.deadT += capture.playing ? real : 0;
-      const cur = a.rack[a.slot]!;
+      const cur = a.rack[a.slot] ?? a.rack[0]!;
       v.character.setWeapon(WEAPONS[cur.id].modelId);
       v.character.update(v.pose, a.id === me.id ? input.yaw : a.view.yaw, capture.playing ? real : 0, {
         armed: true, pitch: a.id === me.id ? input.pitch : a.view.pitch,
@@ -302,7 +312,6 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
       hud.deathScreen(true, killer ? `Eliminated by ${killer}` : 'Eliminated',
         `Respawning in ${Math.max(0, me.hp.respawnT).toFixed(1)} s · next weapon: ${WEAPONS[me.loadout[0]!].name} · press ${choices}`);
     }
-    requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
 
