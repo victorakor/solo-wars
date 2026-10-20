@@ -97,6 +97,7 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
     if (c === 'bot') toggleBot();
     else if (c === 'botLevel') cycleLevel();
     else if (c === 'reset') rebuild();
+    else if (c === 'repeat') { input.holdToFire = !input.holdToFire; hud.feed(input.holdToFire ? 'Hold to fire: on (all weapons)' : 'Hold to fire: off (one click per shot for non-auto)', false); }
     else if (c === 'ammo') {
       infiniteAmmo = !infiniteAmmo;
       for (const a of t.sim.actors) if (a.kind !== 'dummy') t.sim.restock(a, infiniteAmmo);
@@ -258,6 +259,7 @@ export function startGame(canvas: HTMLCanvasElement, hud: Hud, capture: MouseCap
       `Last hit: ${last.text}`,
       last.ttk ? `Last time-to-kill: ${last.ttk}` : 'Last time-to-kill: n/a',
       `Ammo: ${infiniteAmmo ? 'infinite reserve' : 'floor reserves'} · Bot: ${t.sim.actor(BOT_ID) ? botLevel : 'off'}`,
+      `Hold to fire: ${input.holdToFire ? 'on' : 'off'} (H)`,
     ]);
     if (me.hp.alive) hud.deathScreen(false);
     else hud.deathScreen(true, killer ? `Eliminated by ${killer}` : 'Eliminated', `Respawning in ${Math.max(0, me.hp.respawnT).toFixed(1)} s`);

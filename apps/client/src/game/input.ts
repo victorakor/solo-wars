@@ -1,8 +1,16 @@
 import { idleInput, type ActorInput } from '@arena/shared';
 
-export type Command = 'bot' | 'botLevel' | 'reset' | 'ammo';
+export type Command = 'bot' | 'botLevel' | 'reset' | 'ammo' | 'repeat';
 
-const COMMANDS: Record<string, Command> = { KeyB: 'bot', KeyN: 'botLevel', KeyV: 'reset', KeyU: 'ammo' };
+const COMMANDS: Record<string, Command> = { KeyB: 'bot', KeyN: 'botLevel', KeyV: 'reset', KeyU: 'ammo', KeyH: 'repeat' };
+
+/**
+ * Trigger flags for one tick. With `repeat`, holding the button counts as a fresh press every tick, so
+ * semi, pump and bolt weapons keep firing at their own rate (the sim's cooldown still sets the pace).
+ */
+export function fireFlags(held: boolean, latch: boolean, repeat: boolean): { fire: boolean; firePressed: boolean } {
+  return { fire: held || latch, firePressed: latch || (held && repeat) };
+}
 
 /**
  * Desktop input. Nothing is read unless `enabled` (set while the mouse is captured), and the input
@@ -12,6 +20,8 @@ const COMMANDS: Record<string, Command> = { KeyB: 'bot', KeyN: 'botLevel', KeyV:
 export class DesktopInput {
   yaw = 0; pitch = 0.15; sens = 0.0022;
   onCommand: ((c: Command) => void) | null = null;
+  /** Hold the button to keep firing semi, pump and bolt weapons (default on). */
+  holdToFire = true;
   private enabled = false;
   private keys = new Set<string>();
   private dodgeLatch = false; private reloadLatch = false; private fireLatch = false;
@@ -70,7 +80,8 @@ export class DesktopInput {
     out.yaw = this.yaw; out.pitch = this.pitch;
     out.jump = this.keys.has('Space'); out.sprint = this.keys.has('ShiftLeft'); out.crouch = this.keys.has('KeyC');
     out.dodge = this.dodgeLatch; out.ads = this.ads;
-    out.fire = this.fireHeld || this.fireLatch; out.firePressed = this.fireLatch;
+    const f = fireFlags(this.fireHeld, this.fireLatch, this.holdToFire);
+    out.fire = f.fire; out.firePressed = f.firePressed;
     out.reload = this.reloadLatch;
     if (this.slotKey !== null) out.slot = this.slotKey;
     else if (this.wheel !== 0 && count > 0) out.slot = (((slot + this.wheel) % count) + count) % count;

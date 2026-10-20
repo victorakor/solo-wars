@@ -23,6 +23,7 @@ Quit to the start screen from the pause menu; to leave entirely, close the tab.
 | 1-5 or wheel | Sidearm, Rattler, Vanguard, Breaker, Longshot |
 | B / N | add or remove the bot / cycle its difficulty (easy, medium, hard) |
 | U | toggle infinite reserve or floor reserves (restocks) |
+| H | hold-to-fire on or off (on: hold left mouse to keep firing any weapon at its own rate) |
 | V | reset the range |
 | Esc or P | release the mouse and open the menu |
 
