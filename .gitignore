@@ -2,3 +2,4 @@ node_modules
 dist
 .env
 *.log
+arena-duel-master-build-prompt.md
