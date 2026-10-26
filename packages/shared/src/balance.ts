@@ -232,3 +232,42 @@ export const BOT_PROFILES: Record<BotLevel, BotProfile> = {
     dodgeChance: 0.7, jumpiness: 0.35, aggression: 0.9,
   },
 };
+
+// ---------------------------------------------------------------------------
+// Phase 3: netcode (spec 4 and 9)
+// ---------------------------------------------------------------------------
+
+export const NET = {
+  /** Each input batch (sent at 30 Hz for 60 Hz inputs) carries the last this-many inputs, so every input rides in two batches. */
+  inputRedundancy: 4,
+  /** If a snapshot is late, remote entities are extrapolated along their velocity for at most this long, then held. */
+  extrapolateMs: 100,
+  /** Hitbox history kept on the server. */
+  historyMs: 1000,
+  /** Reconciliation: smooth below this error (metres), hard snap at or above. */
+  reconcileSnapM: 1.5,
+  /** Time constant (s) at which the smoothed correction bleeds off. */
+  errorDecaySec: 0.1,
+  /** Server input queue cap per player. */
+  inputQueueMax: 12,
+  /** Catch-up allowance: a player may process this many inputs beyond real time after a lag spike. */
+  inputCreditsMax: 8,
+  pingIntervalMs: 2000,
+  /** No traffic for this long means the connection is considered lost. */
+  silenceMs: 3000,
+  /** The match pauses this long waiting for a dropped player, then they forfeit. */
+  reconnectSec: 30,
+  /** Per-client message budget per second before messages are dropped. */
+  maxInMessagesPerSec: 80,
+  maxPingsPerSec: 4,
+  /** Sustained violations beyond this many dropped messages in a row get the client kicked. */
+  kickAfterDropped: 600,
+  warnRttMs: 200,
+  warnLossPct: 5,
+  /** Each extra actor costs about 3 kbps downstream, so 2 humans + 2 bots is the most that fits the 30 kbps budget. */
+  maxHumans: 2,
+  maxBots: 2,
+  /** Downstream and upstream budgets (kbps), asserted in tests. */
+  budgetDownKbps: 30,
+  budgetUpKbps: 15,
+} as const;

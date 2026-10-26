@@ -30,7 +30,7 @@ export class Hud {
     hpnum: $('hpnum'), hpfill: $('hpfill'), stam: $('stamfill'), roll: $('rollinfo'), vitals: $('vitals'),
     wname: $('wname'), ammo: $('ammo'), reload: $('reload'), slots: $('slots'), crosshair: $('crosshair'),
     scope: $('scope'), vignette: $('vignette'), hit: $('hitmarker'), nums: $('dmgnums'), arcs: $('arcs'),
-    feed: $('feed'), train: $('trainbody'), prompt: $('prompt'), respawn: $('respawn'), rmain: $('respawnmain'), rsub: $('respawnsub'), dbg: $('dbg'),
+    feed: $('feed'), train: $('trainbody'), prompt: $('prompt'), netinfo: $('netinfo'), banner: $('banner'), respawn: $('respawn'), rmain: $('respawnmain'), rsub: $('respawnsub'), dbg: $('dbg'),
   };
   private text = new Map<HTMLElement, string>();
   private vignetteOff = 0;
@@ -108,6 +108,18 @@ export class Hud {
   train(lines: string[]): void {
     this.set(this.el.train, lines.join('\n'));
     this.el.train.style.whiteSpace = 'pre-line';
+  }
+
+  /** Ping and loss readout (online only); `warn` turns it red. Null hides it. */
+  net(text: string | null, warn: boolean): void {
+    this.el.netinfo.style.display = text === null ? 'none' : 'block';
+    if (text !== null) { this.set(this.el.netinfo, text); this.el.netinfo.classList.toggle('warn', warn); }
+  }
+
+  /** Big status line near the top (connecting, waiting for an opponent, paused, forfeit...). Null hides it. */
+  banner(text: string | null): void {
+    this.el.banner.style.display = text === null ? 'none' : 'block';
+    if (text !== null) this.set(this.el.banner, text);
   }
 
   /** Pickup prompt near the bottom centre; null hides it. */

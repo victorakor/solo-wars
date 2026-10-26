@@ -34,6 +34,11 @@ export interface ActorInput extends MoveInput {
   drop: boolean;
   aimYaw?: number;
   aimPitch?: number;
+  /**
+   * Server clock (ms) the shooter was looking at when firing. The server rewinds targets to this time
+   * (clamped) for lag compensation. Absent in local play.
+   */
+  renderTime?: number;
 }
 
 export const idleInput = (): ActorInput => ({
@@ -50,6 +55,8 @@ export interface ActorOptions {
   /** Weapon rack, first entry equipped. Defaults to the full training rack. */
   loadout?: readonly WeaponId[];
   infiniteReserve?: boolean;
+  /** Explicit actor index. Clients mirroring a server room must use the server's, since it seeds spread and recoil. */
+  index?: number;
 }
 
 export interface Actor {
@@ -75,6 +82,8 @@ export interface Actor {
   scratch: MoveInput;
   /** Short lockout after a pickup, swap or drop. */
   pickupCd: number;
+  /** Increments on every respawn; lag compensation must not interpolate a hitbox across a teleport. */
+  epoch: number;
   /** Id of the pickup in reach right now (for the HUD prompt), or null. */
   nearPickup: number | null;
 }
@@ -117,7 +126,7 @@ export interface PelletEvent {
 }
 
 export type CombatEvent =
-  | { type: 'shot'; actor: string; weapon: WeaponId; origin: Vec3; pellets: PelletEvent[] }
+  | { type: 'shot'; actor: string; weapon: WeaponId; shotId: number; origin: Vec3; pellets: PelletEvent[] }
   | {
       type: 'hit'; shooter: string; victim: string; weapon: WeaponId; damage: number; head: boolean;
       dist: number; falloff: number; killed: boolean;
@@ -135,6 +144,14 @@ export class CombatSim {
   readonly actors: Actor[] = [];
   time = 0;
   readonly pickups: Pickup[] = [];
+  /**
+   * True on the server and in local play. A client mirror sets this false: it then runs exactly the same
+   * per-actor step for prediction (movement, weapon timers, ammo, recoil, shot rays for effects) but never
+   * applies damage, kills, stats, pickups or out-of-bounds deaths; those arrive from the server.
+   */
+  authority = true;
+  /** Lag compensation: targets as they were at `renderTime` (ms). Set by the server; null means "now". */
+  rewind: ((shooter: Actor, renderTime: number) => HitTarget[]) | null = null;
   private events: CombatEvent[] = [];
   private nextIndex = 0;
   private nextPickupId = 0;
@@ -156,7 +173,7 @@ export class CombatSim {
     const loadout = o.loadout && o.loadout.length > 0 ? o.loadout : o.kind === 'dummy' ? (['sidearm'] as const) : TRAINING_RACK;
     const infinite = o.infiniteReserve ?? true;
     const a: Actor = {
-      id: o.id, kind: o.kind, name: o.name, index: this.nextIndex++,
+      id: o.id, kind: o.kind, name: o.name, index: o.index ?? this.nextIndex,
       body: newPlayer(o.spawn.x, o.spawn.y + 0.05, o.spawn.z),
       prev: { x: o.spawn.x, y: o.spawn.y + 0.05, z: o.spawn.z },
       hp: newHealth(o.kind === 'dummy' ? 0 : COMBAT.spawnProtectSec),
@@ -166,8 +183,9 @@ export class CombatSim {
       view: { yaw: o.spawn.yaw, pitch: 0 },
       home: o.spawn, loadout, infiniteReserve: infinite,
       scratch: { moveX: 0, moveZ: 0, yaw: 0, pitch: 0, jump: false, sprint: false, crouch: false, dodge: false, ads: false },
-      pickupCd: 0, nearPickup: null,
+      pickupCd: 0, nearPickup: null, epoch: 0,
     };
+    this.nextIndex = Math.max(this.nextIndex, a.index + 1);
     this.actors.push(a);
     return a;
   }
@@ -192,6 +210,11 @@ export class CombatSim {
     return out;
   }
 
+  /** Puts events back at the front of the queue (used after a prediction replay discards its own). */
+  restoreEvents(saved: CombatEvent[]): void {
+    this.events = saved.concat(this.events);
+  }
+
   /** Returns and clears the events produced since the last call. */
   drainEvents(): CombatEvent[] {
     const e = this.events;
@@ -208,21 +231,39 @@ export class CombatSim {
     a.slot = 0;
     resetRecoil(a.recoil);
     a.pickupCd = 0; a.nearPickup = null;
+    a.epoch++;
     a.view.yaw = spawn.yaw; a.view.pitch = 0;
   }
 
+  /** One whole tick: world timers, every living actor once with its input, then bookkeeping. */
   step(dt: number, inputs: ReadonlyMap<string, ActorInput>): void {
+    this.beginTick(dt);
+    for (const a of this.actors) this.stepActor(a, inputs.get(a.id) ?? IDLE_INPUT, dt);
+    this.endTick();
+  }
+
+  /** World timers: clock, interpolation anchors, pad respawns, and respawn countdowns of the dead. */
+  beginTick(dt: number): void {
     this.time += dt;
     for (const a of this.actors) { a.prev.x = a.body.pos.x; a.prev.y = a.body.pos.y; a.prev.z = a.body.pos.z; }
     this.tickPickups(dt);
     for (const a of this.actors) {
-      if (!a.hp.alive) {
-        a.hp.respawnT -= dt;
-        if (a.hp.respawnT <= 0) this.respawn(a);
-        continue;
-      }
-      this.stepAlive(a, inputs.get(a.id) ?? IDLE_INPUT, dt);
+      if (a.hp.alive) continue;
+      a.hp.respawnT -= dt;
+      if (a.hp.respawnT <= 0) this.respawn(a);
     }
+  }
+
+  /**
+   * Advances one actor by one input (movement, weapon, firing, pickups). The server calls this once per
+   * received input, which may be more than once per tick while a player catches up after a lag spike;
+   * the client calls it for every predicted input. Does nothing for a dead actor.
+   */
+  stepActor(a: Actor, inp: Readonly<ActorInput>, dt: number): void {
+    if (a.hp.alive) this.stepAlive(a, inp, dt);
+  }
+
+  endTick(): void {
     // a pickup in reach can be taken by someone else later in the tick, or its owner can die on it
     for (const a of this.actors) {
       if (a.nearPickup === null) continue;
@@ -265,7 +306,7 @@ export class CombatSim {
     stepPlayer(a.body, m, dt, this.world);
     a.view.yaw = inp.yaw; a.view.pitch = inp.pitch;
 
-    if (a.body.pos.y < COMBAT.killY) {
+    if (this.authority && a.body.pos.y < COMBAT.killY) {
       forceKill(a.hp);
       this.registerKill(a, null, null, false);
       return;
@@ -285,6 +326,7 @@ export class CombatSim {
       if (ws.reloading) this.events.push({ type: 'reloadStart', actor: a.id });
     } else if (fr === 'fired') this.fire(a, ws, inp);
 
+    if (!this.authority) return; // pickups and ammo-empty removal are decided by the server
     this.stepPickups(a, inp, dt);
     this.reapEmptyFloorWeapon(a);
   }
@@ -377,10 +419,16 @@ export class CombatSim {
     const pitch = clamp((inp.aimPitch ?? inp.pitch) + a.recoil.pitch, -1.5, 1.5);
     const origin = { x: a.body.pos.x, y: a.body.pos.y + eyeHeightOf(a.body), z: a.body.pos.z };
     const spread = currentSpreadDeg(def, ws.adsT, motionOf(a.body));
+    const targets = this.rewind && inp.renderTime !== undefined ? this.rewind(a, inp.renderTime) : this.targetsFor(a);
     const res = resolveShot(
       this.world, def, { origin, yaw, pitch, spreadDeg: spread, seed: this.seed, shotId, salt: a.index, damageMult: ws.dmgMult },
-      this.targetsFor(a),
+      targets,
     );
+    if (!this.authority) { // predicted shot: effects only. Damage and hits come from the server.
+      this.events.push({ type: 'shot', actor: a.id, weapon: def.id, shotId, origin, pellets: res.pellets.map((p) => ({ point: p.point, kind: p.kind })) });
+      kickRecoil(a.recoil, def, shotRng(this.seed, shotId, a.index * 2 + 1));
+      return;
+    }
     a.stats.shotsFired++;
 
     // one hit event per victim per trigger pull (shotgun pellets are summed)
@@ -391,7 +439,7 @@ export class CombatSim {
       if (g) { g.damage += p.damage; g.head ||= p.kind === 'head'; if (p.dist < g.dist) { g.dist = p.dist; g.falloff = p.falloff; } }
       else groups.set(p.targetId, { damage: p.damage, head: p.kind === 'head', dist: p.dist, falloff: p.falloff });
     }
-    this.events.push({ type: 'shot', actor: a.id, weapon: def.id, origin, pellets: res.pellets.map((p) => ({ point: p.point, kind: p.kind })) });
+    this.events.push({ type: 'shot', actor: a.id, weapon: def.id, shotId, origin, pellets: res.pellets.map((p) => ({ point: p.point, kind: p.kind })) });
     let anyHead = false;
     for (const [victimId, g] of groups) {
       const v = this.actor(victimId);

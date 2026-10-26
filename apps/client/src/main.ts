@@ -25,4 +25,6 @@ menu.handlers = {
   addBot: game.addBot,
   removeBot: game.removeBot,
   botCount: game.botCount,
+  joinOnline: game.joinOnline,
+  isOnline: game.isOnline,
 };

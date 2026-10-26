@@ -42,15 +42,19 @@ export function createTraining(seed: number, opts: TrainingOptions = {}, scene: 
 }
 
 /**
- * Adds one bot at the spawn farthest from, and hidden from, everyone alive. Each bot gets its own loadout
- * weapon (random unless given) and fights everybody, including other bots.
+ * Adds one bot to any sim at the spawn farthest from, and hidden from, everyone alive. `n` is the bot's ordinal
+ * (for its id and name); the loadout weapon is random (seeded) unless given.
  */
-export function addBot(t: Training, level: BotLevel, weapon?: WeaponId): Actor {
-  const n = ++t.botSeq;
-  const eyes = t.sim.actors
+export function addBotTo(sim: CombatSim, seed: number, n: number, level: BotLevel, weapon?: WeaponId): Actor {
+  const eyes = sim.actors
     .filter((a) => a.kind !== 'dummy' && a.hp.alive)
     .map((a) => ({ x: a.body.pos.x, y: a.body.pos.y + eyeHeightOf(a.body), z: a.body.pos.z }));
-  const spawn = pickSpawn(t.sim.world, t.sim.spawns, eyes);
-  const w = weapon ?? BOT_WEAPONS[Math.floor(mulberry32(mixSeed(t.seed, n))() * BOT_WEAPONS.length)]!;
-  return t.sim.addActor({ id: `bot-${n}`, kind: 'bot', name: `Bot ${n} (${level})`, spawn, loadout: [w] });
+  const spawn = pickSpawn(sim.world, sim.spawns, eyes);
+  const w = weapon ?? BOT_WEAPONS[Math.floor(mulberry32(mixSeed(seed, n))() * BOT_WEAPONS.length)]!;
+  return sim.addActor({ id: `bot-${n}`, kind: 'bot', name: `Bot ${n} (${level})`, spawn, loadout: [w] });
+}
+
+/** Adds one practice bot to a training range. */
+export function addBot(t: Training, level: BotLevel, weapon?: WeaponId): Actor {
+  return addBotTo(t.sim, t.seed, ++t.botSeq, level, weapon);
 }

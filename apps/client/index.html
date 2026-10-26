@@ -92,6 +92,11 @@
       #menu .row { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; flex-wrap: wrap; }
       #menu .row button { margin: 0; padding: 6px 12px; font-size: 14px; }
       #menu .row b { min-width: 1.6em; text-align: center; }
+      #netinfo { right: 16px; top: 12px; display: none; background: #0008; padding: 3px 8px; font-size: 12px; margin-top: 150px; }
+      #netinfo.warn { color: #ff6a4a; border: 1px solid #ff6a4a; }
+      #banner { left: 50%; top: 14%; transform: translateX(-50%); display: none; background: #000b; padding: 10px 22px; border: 1px solid #fff4; font-size: 20px; text-align: center; }
+      #menu .online input { font: inherit; background: #0d1217; color: #e8eef4; border: 1px solid #fff3; border-radius: 4px; padding: 6px 8px; width: 11em; }
+      #menu .online input.wide { width: 15em; }
       #prompt { left: 50%; bottom: 22%; transform: translateX(-50%); display: none; background: #000a; padding: 6px 14px; border: 1px solid #fff4; font-size: 15px; }
       #switchhint { opacity: .6; font-size: 11px; margin-top: 4px; }
       #menu .keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 12px 0; opacity: .85; }
@@ -120,12 +125,14 @@
       <div id="switchhint">Switch: <kbd>1</kbd> <kbd>2</kbd> or wheel · <kbd>E</kbd> pick up / swap · <kbd>X</kbd> drop</div>
     </div>
     <div id="prompt" class="fx"></div>
+    <div id="netinfo" class="fx"></div>
+    <div id="banner" class="fx"></div>
     <div id="feed" class="fx"></div>
     <div id="train" class="fx"><h4>Free-for-all</h4><div id="trainbody"></div></div>
     <div id="help" class="fx">
       <kbd>Esc</kbd> or <kbd>P</kbd> release mouse · WASD move · Shift sprint · Space jump · C crouch · Q roll<br />
       LMB fire · RMB aim · R reload · <kbd>1</kbd>/<kbd>2</kbd>/wheel switch weapon · <kbd>E</kbd> pick up / swap · <kbd>X</kbd> drop<br />
-      <kbd>B</kbd> add bot · <kbd>K</kbd> remove bot · <kbd>N</kbd> bot level · <kbd>H</kbd> hold-to-fire · <kbd>V</kbd> restart
+      <kbd>B</kbd> add bot · <kbd>K</kbd> remove bot (local) · <kbd>N</kbd> bot level · <kbd>H</kbd> hold-to-fire · <kbd>V</kbd> restart
     </div>
     <div id="dbg" class="fx"></div>
     <div id="respawn" class="fx"><div id="respawnmain"></div><small id="respawnsub"></small></div>
@@ -143,6 +150,18 @@
         </div>
         <div class="row" id="live-bots">
           Bots now <button id="live-minus">- Bot</button><button id="live-plus">+ Bot</button>
+        </div>
+        <h3>Play online (duel)</h3>
+        <div class="row online">
+          Server <input id="srv-url" class="wide" value="" spellcheck="false" />
+        </div>
+        <div class="row online">
+          Name <input id="srv-name" value="Player" maxlength="24" />
+          Room code <input id="srv-code" value="duel" maxlength="32" />
+        </div>
+        <div class="row">
+          <button id="btn-online">Join online</button>
+          <span id="online-note" style="opacity:.7;font-size:12px">Two players with the same room code meet in one match. Bots (set above) fill in for a practice room.</span>
         </div>
         <div style="margin-top:10px">
           <button id="btn-resume" class="primary">Play</button>

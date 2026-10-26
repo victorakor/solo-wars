@@ -58,3 +58,6 @@ export const FOUNDRY: SceneDef = {
     { x: 0, y: 0, z: 0, pair: 3 },
   ],
 };
+
+/** Scenes by id, so a client can load whichever one the server names. */
+export const SCENES: Record<string, SceneDef> = { [FOUNDRY.id]: FOUNDRY };

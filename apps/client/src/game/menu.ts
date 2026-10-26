@@ -19,7 +19,16 @@ export interface MenuConfig {
   level: BotLevel;
 }
 
+export interface OnlineRequest {
+  url: string;
+  name: string;
+  code: string;
+}
+
 export interface MenuHandlers {
+  /** Join (or create) an online match room. Rejects with a readable message on failure. */
+  joinOnline(req: OnlineRequest): Promise<void>;
+  isOnline(): boolean;
   /** Start a fresh fight with the current config. */
   apply(): void;
   /** The weapon choice changed (takes effect at your next respawn, or on restart). */
@@ -35,6 +44,8 @@ export class Menu {
   handlers: MenuHandlers | null = null;
   private root = $('menu'); private title = $('menu-title'); private sub = $('menu-sub'); private err = $('menu-error');
   private resume = $<HTMLButtonElement>('btn-resume'); private reset = $<HTMLButtonElement>('btn-reset'); private quit = $<HTMLButtonElement>('btn-quit');
+  /** A one-off message under the title (e.g. why joining online failed). */
+  notice = '';
   private cards = $('cards'); private botsN = $('bots-n'); private level = $<HTMLButtonElement>('level'); private live = $('live-bots');
 
   constructor(private capture: MouseCapture) {
@@ -53,13 +64,26 @@ export class Menu {
     this.level.addEventListener('click', () => { this.level.blur(); this.cycleLevel(); });
     $('live-plus').addEventListener('click', () => { this.handlers?.addBot(); this.render(); });
     $('live-minus').addEventListener('click', () => { this.handlers?.removeBot(); this.render(); });
+    const url = $<HTMLInputElement>('srv-url');
+    url.value = (import.meta.env.VITE_SERVER_URL as string | undefined) ?? `ws://${location.hostname || 'localhost'}:2567`;
+    $('btn-online').addEventListener('click', () => {
+      $('btn-online').blur();
+      this.notice = 'Connecting...';
+      this.render();
+      const req = { url: url.value.trim(), name: $<HTMLInputElement>('srv-name').value.trim() || 'Player', code: $<HTMLInputElement>('srv-code').value.trim() || 'duel' };
+      capture.engage(); // inside the click, so the browser allows pointer lock; released again if joining fails
+      this.handlers?.joinOnline(req).then(
+        () => { this.notice = ''; this.render(); },
+        (e: unknown) => { this.notice = `Could not join: ${e instanceof Error ? e.message : String(e)}`; capture.release(); this.render(); },
+      );
+    });
     this.resume.addEventListener('click', () => {
       this.resume.blur();
       if (capture.state === 'start') this.handlers?.apply();
       capture.engage();
     });
     this.reset.addEventListener('click', () => { this.reset.blur(); this.handlers?.apply(); capture.engage(); });
-    this.quit.addEventListener('click', () => { this.quit.blur(); capture.quit(); });
+    this.quit.addEventListener('click', () => { this.quit.blur(); this.handlers?.apply(); capture.quit(); });
     capture.onChange(() => this.render());
     this.render();
   }
@@ -82,6 +106,6 @@ export class Menu {
     for (const c of Array.from(this.cards.children) as HTMLElement[]) c.classList.toggle('on', c.dataset.id === this.config.weapon);
     this.botsN.textContent = String(this.config.bots);
     this.level.textContent = this.config.level[0]!.toUpperCase() + this.config.level.slice(1);
-    this.err.textContent = this.capture.error ?? '';
+    this.err.textContent = this.capture.error ?? this.notice;
   }
 }

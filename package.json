@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:match": "node scripts/matchsmoke.mjs"
   },
   "devDependencies": {
     "colyseus.js": "^0.16.0",
